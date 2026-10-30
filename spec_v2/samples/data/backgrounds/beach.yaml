@@ -1,0 +1,18 @@
+id: beach
+name: 海辺
+tags: [海辺]
+rating: safe
+canvas: { w: 1536, h: 1024 }
+metaTags: [beach scene]
+mossCaption: |
+  A sunny beach in the daytime, with the blue sea stretching to the horizon, gentle waves along the shoreline, wet sand and a clear sky with a few white clouds.
+mossItems:
+  - label: object
+    caption: The sea and the shoreline, with gentle waves, wet sand and the horizon under a clear blue sky.
+    bbox: [-512, -768, -80, 768]
+anima: |
+  beach, ocean, sand, blue sky, outdoors, daytime
+negativeMoss: |
+  indoor, interior, room, city, street, night, snow, rain
+negativeAnima: |
+  indoors, room, city, night, snow, rain

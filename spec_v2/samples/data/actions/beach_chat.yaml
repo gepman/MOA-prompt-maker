@@ -1,0 +1,27 @@
+id: beach_chat
+name: 海辺で談笑
+tags: [日常]
+rating: safe
+background: beach
+slots: [left, center, right]
+outfits:
+  center: elesa_bw_summer
+metaTags: [group portrait]
+mossCaption: |
+  Three adult women stand in a row on the sand, chatting and laughing together in a friendly conversation.
+mossItems:
+  - label: object
+    caption: "{{left}} {{left.outfit}} She laughs with her mouth open, one hand raised mid-gesture as she talks."
+    bbox: [-380, -640, 320, -260]
+  - label: object
+    caption: "{{center}} {{center.outfit}} She laughs with her head tilted slightly back, both hands clasped in front of her chest."
+    bbox: [-380, -190, 320, 190]
+  - label: object
+    caption: "{{right}} {{right.outfit}} She giggles with one hand held near her mouth, her shoulders shaking."
+    bbox: [-380, 260, 320, 640]
+anima: |
+  {{left}}, {{center}}, {{right}}, {{left.outfit}}, {{center.outfit}}, {{right.outfit}}, standing, talking, laughing, smile, open mouth
+negativeMoss: |
+  duplicate, split screen, text, watermark, blurry, low quality, worst quality
+negativeAnima: |
+  duplicate

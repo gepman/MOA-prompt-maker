@@ -1,9 +1,10 @@
-"""ComfyUI の HTTP API クライアント（/prompt, /history, /queue, /view）。"""
+"""ComfyUI の API クライアント：HTTP（/prompt, /view, /object_info, /interrupt）と WebSocket（/ws の進捗）。"""
 from __future__ import annotations
 
-import time
+import json
 import uuid
-from typing import Generator
+from contextlib import contextmanager
+from typing import Callable, ContextManager, Iterator
 
 import httpx
 
@@ -22,15 +23,39 @@ def _format_rejection(body: dict) -> str:
     return "\n".join(lines)
 
 
+class EventStream:
+    """WebSocket のイベントを1つずつ返す。`get` はタイムアウトしたら None（テストでは差し替えられる）。"""
+
+    def __init__(self, ws):
+        self._ws = ws
+
+    def get(self, timeout: float) -> dict | None:
+        from websockets.exceptions import ConnectionClosed
+        try:
+            msg = self._ws.recv(timeout=timeout)
+        except TimeoutError:
+            return None
+        except ConnectionClosed:
+            raise ComfyError("ComfyUI との WebSocket 接続が切れました") from None
+        if isinstance(msg, bytes):  # プレビュー画像などのバイナリは使わない
+            return {"type": "binary"}
+        try:
+            return json.loads(msg)
+        except ValueError:
+            return {"type": "unknown"}
+
+
 class ComfyClient:
-    def __init__(self, url: str, timeout_sec: float = 600, poll_interval: float = 1.0):
+    def __init__(self, url: str, timeout_sec: float = 600,
+                 event_source: Callable[[], ContextManager[EventStream]] | None = None):
         self.url = url.rstrip("/")
         self.timeout_sec = timeout_sec
-        self.poll_interval = poll_interval
         self.client_id = uuid.uuid4().hex
+        self._event_source = event_source  # テスト用：WebSocket の代わりに使うイベント列
         # localhost への接続がシステムのプロキシ設定に影響されないようにする
         self.http = httpx.Client(base_url=self.url, timeout=30, trust_env=False)
 
+    # ---- HTTP ----
     def _request(self, method: str, path: str, **kw) -> httpx.Response:
         try:
             return self.http.request(method, path, **kw)
@@ -51,34 +76,55 @@ class ComfyClient:
             raise ComfyError(_format_rejection(body))
         return body["prompt_id"]
 
-    def iter_wait(self, prompt_id: str) -> Generator[str, None, dict]:
-        """完了まで待つ。経過を文字列で yield し、最後に history の outputs を返す。"""
-        start = time.monotonic()
-        while True:
-            elapsed = time.monotonic() - start
-            if elapsed > self.timeout_sec:
-                raise ComfyError(f"{self.timeout_sec:.0f}秒待っても完了しませんでした。ComfyUI側では実行が続いている可能性があります（prompt_id: {prompt_id}）")
-            hist = self._request("GET", f"/history/{prompt_id}").json()
-            entry = hist.get(prompt_id)
-            if entry:
-                status = entry.get("status") or {}
-                if status.get("status_str") == "error":
-                    msgs = [m[1].get("exception_message", "") for m in status.get("messages", [])
-                            if isinstance(m, list) and len(m) == 2 and isinstance(m[1], dict)]
-                    raise ComfyError("ComfyUI での実行中にエラーが発生しました：" + " ".join(m for m in msgs if m).strip())
-                if status.get("completed", True) or entry.get("outputs"):
-                    return entry.get("outputs", {})
-            q = self._request("GET", "/queue").json()
-            pending = [item[1] for item in q.get("queue_pending", [])]
-            if prompt_id in pending:
-                state = f"キュー待ち（{pending.index(prompt_id) + 1}番目）"
-            else:
-                state = "実行中"
-            yield f"{state}… {elapsed:.0f}秒"
-            time.sleep(self.poll_interval)
-
     def fetch_image(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         r = self._request("GET", "/view", params={"filename": filename, "subfolder": subfolder, "type": type_})
         if r.status_code != 200:
             raise ComfyError(f"画像 {filename} を取得できません（HTTP {r.status_code}）")
         return r.content
+
+    def interrupt(self) -> None:
+        """実行中のジョブを中断する（段のタイムアウトのとき）。失敗しても例外にしない。"""
+        try:
+            self.http.post("/interrupt")
+        except httpx.HTTPError:
+            pass
+
+    def cancel_queued(self, prompt_id: str) -> None:
+        """まだ始まっていないジョブをキューから外す。失敗しても例外にしない。"""
+        try:
+            self.http.post("/queue", json={"delete": [prompt_id]})
+        except httpx.HTTPError:
+            pass
+
+    def input_max(self, class_type: str, input_name: str) -> int | None:
+        """ノードクラスの入力の最大値（`/object_info`）。取れなければ None。"""
+        try:
+            r = self.http.get(f"/object_info/{class_type}")
+            spec = r.json()[class_type]["input"]
+            for section in ("required", "optional"):
+                if input_name in spec.get(section, {}):
+                    cfg = spec[section][input_name]
+                    return int(cfg[1]["max"]) if len(cfg) > 1 and "max" in cfg[1] else None
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+            pass
+        return None
+
+    # ---- WebSocket ----
+    @contextmanager
+    def events(self) -> Iterator[EventStream]:
+        """進捗イベントを購読する。**`submit` の前に開く**こと（始まりのイベントを取りこぼさないため）。"""
+        if self._event_source is not None:
+            with self._event_source() as stream:
+                yield stream
+            return
+        from websockets.exceptions import WebSocketException
+        from websockets.sync.client import connect
+        ws_url = ("wss" if self.url.startswith("https") else "ws") + self.url[self.url.index("://"):]
+        try:
+            ws = connect(f"{ws_url}/ws?clientId={self.client_id}", open_timeout=10, max_size=None)
+        except (OSError, TimeoutError, WebSocketException) as e:
+            raise ComfyError(f"ComfyUI の WebSocket（{ws_url}/ws）に接続できません：{e}") from None
+        try:
+            yield EventStream(ws)
+        finally:
+            ws.close()

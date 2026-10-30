@@ -1,0 +1,11 @@
+id: beach_wave_boy__elesa
+name: 海辺で男の子に手を振る（カミツレ）
+background: beach
+action: beach_wave_boy
+cast:
+  girl:
+    character: elesa_bw
+    outfit: hex_summer   # Scene の上書き → defaultOutfit (elesa_bw_summer) より優先
+applyNegative: true
+gen:
+  anima: { denoise: 0.45 }

@@ -1,0 +1,7 @@
+applyNegative: false（false のとき送信ペイロードのネガティブは空。ComfyUI連携ではノードに触れない）
+
+[assembled MOSS negative]
+photorealistic, realistic, blurry, low quality, worst quality, text, watermark, deformed hands, extra fingers, extra limbs, censored, mosaic, short hair, indoor, interior, room, city, street, night, snow, rain, duplicate, split screen
+
+[assembled Anima negative]
+worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration, censored, mosaic censoring, short hair, indoors, room, city, night, snow, rain, duplicate

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "outfit.schema.json",
+  "title": "Outfit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "moss",
+    "anima"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "not": {
+        "const": "none"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "moss": {
+      "type": "string"
+    },
+    "anima": {
+      "type": "string"
+    },
+    "negativeMoss": {
+      "type": "string"
+    },
+    "negativeAnima": {
+      "type": "string"
+    }
+  }
+}

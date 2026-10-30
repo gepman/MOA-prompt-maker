@@ -1,0 +1,7 @@
+applyNegative: false（false のとき送信ペイロードのネガティブは空。ComfyUI連携ではノードに触れない）
+
+[assembled MOSS negative]
+photorealistic, realistic, blurry, low quality, worst quality, text, watermark, deformed hands, extra fingers, extra limbs, censored, mosaic, black hair, blonde hair, pale skin, short hair, long hair, very long hair, yellow catsuit, blue catsuit, pink catsuit, room, interior, furniture, scenery, outdoors, gradient background, duplicate, same face, wrong colors, kimono, japanese clothes, dress, cat ears, animal ears
+
+[assembled Anima negative]
+worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration, censored, mosaic censoring, black hair, blonde hair, pale skin, short hair, long hair, very long hair, yellow catsuit, blue catsuit, pink catsuit, scenery, outdoors, gradient background, gray background, 1girl, 2girls, 4girls, duplicate, same face, wrong colors, kimono, japanese clothes, dress, cat ears, animal ears, man, boy

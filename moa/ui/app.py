@@ -1,4 +1,4 @@
-"""シーン組み立て画面（10章）。ロジックは moa.ui.logic、コンパイルは moa.core にある。"""
+"""シーン組み立て画面（10章）。ロジックは moa.ui.logic、コンパイルは moa.core、生成は moa.comfy にある。"""
 from __future__ import annotations
 
 import copy
@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Callable
 
 import gradio as gr
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from moa.comfy import ComfyConfig, ComfyError, Generation, iter_run
+from moa.comfy import (ComfyConfig, ComfyError, Generation, differences, effective_gen, iter_retry_anima,
+                       iter_run)
 from moa.comfy.config import STAGE_LABEL
 from moa.core import Repository
 from moa.core.gen import GEN_PARAMS
@@ -45,11 +46,11 @@ def build_ui(repo: Repository,
     with gr.Blocks(title="MOSS/Anima プロンプトビルダー") as demo:
         sc = gr.State(L.new_sc())
         nav = gr.State(L.new_nav())
-        gen = gr.State(None)  # 直近の生成結果（保存ボタンで Scene に記録する）
+        gen = gr.State(None)  # 直近の生成結果のスナップショット（保存ボタンで Scene に記録する。再試行にも使う）
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
 
         with gr.Row():
-            # ---- 左：共有ブラウザ（常時表示。キャスト枠のボタンで選択先を切り替える）----
+            # ---- 左：共有ブラウザ（常時表示。ボタンで選択先を切り替える）----
             with gr.Column(scale=2, min_width=320):
                 target_md = gr.Markdown(L.target_label(L.new_nav()))
                 crumbs_md = gr.Markdown()
@@ -58,17 +59,21 @@ def build_ui(repo: Repository,
                 with gr.Row():
                     upload = gr.UploadButton("YAMLファイルを指定", file_types=[".yaml", ".yml"], size="sm")
                     reload_btn = gr.Button("🔄 データ再読み込み", size="sm")
+                setdir_btn = gr.Button("📍 このフォルダを保存先にする", size="sm")
 
             # ---- 右：Scene 組み立て ----
             with gr.Column(scale=5):
                 sel_md = gr.Markdown()
-                reselect_btn = gr.Button("🔁 Situation / Scene を選び直す", size="sm")
+                with gr.Row():
+                    pick_scene_btn = gr.Button("📂 Scene を開く", size="sm")
+                    pick_action_btn = gr.Button("🎬 Action を選ぶ", size="sm")
+                    pick_bg_btn = gr.Button("🏞 Background を選ぶ", size="sm")
 
                 @gr.render(inputs=[sc])
                 def render_slots(sc_v):
                     slots = L.slots_of(repo, sc_v)
                     if not slots:
-                        gr.Markdown("_Situation を選ぶと、スロットの数だけキャスト枠が表示されます。_")
+                        gr.Markdown("_Action を選ぶと、スロットの数だけキャスト枠が表示されます。_")
                         return
                     with gr.Row():
                         for slot in slots:
@@ -84,6 +89,7 @@ def build_ui(repo: Repository,
                                 outfit_rd.input(partial(on_outfit, slot), [sc, nav, outfit_rd], FULL)
 
                 neg_cb = gr.Checkbox(label="ネガティブを適用する（既定OFF。OFFでも合成結果は下に表示）", value=False)
+                summary_md = gr.Markdown()
                 moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=False)
                 anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=False)
                 with gr.Row():
@@ -118,6 +124,7 @@ def build_ui(repo: Repository,
                                                    scale=2, min_width=120)
                                 items[(stage, param)] = (sl, src, rb)
                 gen_btn = gr.Button("🎨 生成", variant="primary")
+                retry_btn = gr.Button("🔁 Anima段だけ再試行", visible=False)
                 gen_status = gr.Markdown()
                 gallery = gr.Gallery(label="生成結果（MOSS段 → Anima段）", columns=2, height="auto",
                                      object_fit="contain", interactive=False)
@@ -127,16 +134,22 @@ def build_ui(repo: Repository,
                 with gr.Row():
                     name_tb = gr.Textbox(label="Scene表示名（任意）", scale=2)
                     slug_tb = gr.Textbox(
-                        label="Scene名（半角英小文字・数字・_）",
-                        info="空欄なら「名前_1」「名前_2」…と番号を付けて新規保存。既存と同じ名前を入力したときだけ上書き",
+                        label="Scene の id（半角英小文字・数字・_）",
+                        info="空欄なら「<名前>_1」「_2」…と番号を付けて新規保存（開いている Scene があればその id、なければ <Action の id>__scene）。"
+                             "既存と同じ id を入力したときだけ上書き。目安は「<Action の id>__〜」",
                         scale=3)
+                with gr.Row():
+                    savedir_md = gr.Markdown(L.savedir_text(repo, L.new_nav()))
+                    pick_save_btn = gr.Button("📁 保存先フォルダを選ぶ", size="sm")
                 save_btn = gr.Button("💾 保存", variant="secondary")
                 save_msg = gr.Markdown()
 
-        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg]
-        FULL = [sc, nav, lst, crumbs_md, target_md, browse_msg,
-                sel_md, moss_tb, anima_tb, negm_tb, nega_tb, issues_md, neg_cb, name_tb, slug_tb]
+        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md]
+        FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
+                                 name_tb, slug_tb]
+        SLUG_IDX = FULL.index(slug_tb)
         GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]]
+        GEN_OUT = [gen_status, gallery, gen, retry_btn]
 
         # ---- 出力の組み立て ----
         def data_issues_text() -> str:
@@ -147,36 +160,39 @@ def build_ui(repo: Repository,
         def nav_part(nav_v, msg):
             choices, crumbs = L.listing(repo, nav_v)
             return [nav_v, gr.update(choices=choices, value=None), crumbs, L.target_label(nav_v),
-                    gr.skip() if msg is None else msg]
+                    gr.skip() if msg is None else msg, L.savedir_text(repo, nav_v)]
 
         def nav_out(nav_v, msg=None):
             return nav_part(nav_v, msg)
 
         def full(sc_old, sc_new, nav_v, msg=None, sc_changed=True):
             if not sc_changed:  # フォルダ移動だけのときは、枠の描き直しとコンパイルを避ける
-                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 9
+                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 10
             r = L.compile_view(repo, sc_new)
             apply = sc_new["apply_negative"]
             note = "" if apply else "（未適用・参考表示）"
-            if r is None:
+            if r is None or not r.ok:
                 moss = anima = negm = nega = ""
-                issues = ""
             else:
                 moss, anima, negm, nega = (r.moss_prompt, r.anima_prompt, r.negative_moss, r.negative_anima)
-                issues = L.issues_text(r.issues)
-            switched = (sc_old["situation_id"], sc_old["scene_id"]) != (sc_new["situation_id"], sc_new["scene_id"])
+            issues = L.issues_text(r.issues) if r is not None else ""
+            opened = sc_old["open_seq"] != sc_new["open_seq"]
             return [sc_new] + nav_part(nav_v, msg) + [
                 L.selection_text(repo, sc_new), moss, anima,
                 gr.update(value=negm, label=f"ネガティブ（MOSS用）{note}"),
                 gr.update(value=nega, label=f"ネガティブ（Anima用）{note}"),
-                issues, apply,
-                gr.update(value=sc_new["scene_name"]) if switched else gr.skip(),
-                gr.update(value="") if switched else gr.skip(),
+                L.summary_text(r), issues, apply,
+                gr.update(value=sc_new["scene_name"]) if opened else gr.skip(),
+                gr.update(value="") if opened else gr.skip(),
             ]
 
         # ---- イベント ----
         def on_pick(target, slot, nav_v):
             return nav_out(L.set_target(nav_v, target, slot), "")
+
+        def on_setdir(nav_v):
+            nav2, msg = L.choose_savedir(repo, nav_v)
+            return nav_out(nav2, msg)
 
         def on_outfit(slot, sc_v, nav_v, value):
             return full(sc_v, L.set_outfit(sc_v, slot, value), nav_v)
@@ -210,9 +226,17 @@ def build_ui(repo: Repository,
             reload_comfy()
             return full(sc_v, sc_v, nav_v, "") + [data_issues_text()] + comfy_parts()
 
+        def effective_of(gp_v):
+            cfg = comfy["cfg"]
+            return effective_gen(cfg, gp_v["gen"]) if cfg is not None and cfg.samplers else None
+
         def on_save(sc_v, nav_v, slug, display_name, gen_v, gp_v):
-            sc2, msg = L.save(repo, sc_v, slug, display_name, gen_v, gen_params=gp_v["gen"])
-            return full(sc_v, sc2, nav_v) + [msg, data_issues_text()]
+            sc2, msg = L.save(repo, sc_v, nav_v, slug, display_name, gen_v, gen_params=gp_v["gen"],
+                              effective=effective_of(gp_v))
+            out = full(sc_v, sc2, nav_v)
+            if msg.startswith("💾"):
+                out[SLUG_IDX] = gr.update(value="")  # 保存できたら id 欄を空に戻す
+            return out + [msg, data_issues_text()]
 
         # ---- 生成パラメータ（スライダー）----
         def gp_view(gp_v):
@@ -247,44 +271,91 @@ def build_ui(repo: Repository,
                 return gr.skip(), f"⚠ {e}"
             return (path, gr.skip()) if path else (gr.skip(), gr.skip())
 
+        # ---- 生成（13章）----
+        def gallery_items(done: Generation):
+            shots = [(Image.open(io.BytesIO(i.data)), f"{STAGE_LABEL[i.stage]}：{Path(i.record_path).name}")
+                     for i in done.images]
+            if done.failed_stage == "anima":  # Anima 枠は「失敗」と表示する
+                tile = Image.new("RGB", (256, 256), "#4a1d1d")
+                ImageDraw.Draw(tile).text((88, 120), "FAILED", fill="white")
+                shots.append((tile, "Anima段：失敗"))
+            return shots
+
+        def finished(done: Generation):
+            """生成（または再試行）の結果を、画面の出力にする。"""
+            paths = "\n".join(f"- {STAGE_LABEL[i.stage]}：`{i.record_path}`" for i in done.images)
+            used = f"\n\n使った値：{L.gen_summary(done.gen)}" if done.gen else ""
+            if done.complete:
+                status = (f"✅ 完了　シード `{done.seed}`（MOSS段・Anima段で共通）{used}\n\n{paths}\n\n"
+                          "※ 保存ボタンを押すと、シードと画像のパスが Scene に記録されます")
+                return [status, gallery_items(done), done.snapshot(), gr.update(visible=False)]
+            if done.failed_stage == "anima":
+                status = (f"⚠ **Anima段が失敗しました**（MOSS段は成功）：{done.error}\n\n"
+                          f"MOSS画像は残してあります。「Anima段だけ再試行」で、同じシード `{done.seed}` のまま Anima段だけを再送できます。\n\n"
+                          f"{paths}{used}\n\n※ このまま保存すると、MOSS段だけの部分結果として記録されます（`compiled.partial: true`）")
+                return [status, gallery_items(done), done.snapshot(), gr.update(visible=True)]
+            status = (f"❌ **MOSS段が失敗しました**：{done.error}\n\n画像は記録されません。選んだシードは破棄し、"
+                      "再生成では新しいシードを使います")
+            return [status, [], None, gr.update(visible=False)]
+
+        def stream(events):
+            """iter_run / iter_retry_anima のイベントを、画面の更新に変える。"""
+            skip = gr.skip()
+            done = None
+            try:
+                for ev in events:
+                    if isinstance(ev, Generation):
+                        done = ev
+                    else:
+                        yield [f"⏳ {ev}", skip, skip, skip]
+            except ComfyError as e:
+                yield [f"❌ {e}", skip, skip, skip]
+                return
+            except OSError as e:
+                yield [f"❌ 画像のコピーに失敗しました：{e}", skip, skip, skip]
+                return
+            yield finished(done)
+
         def on_generate(sc_v, copy_dir, gp_v):
             """生成を実行し、経過を逐次表示する。YAMLへの記録は保存ボタンで行う。"""
             skip = gr.skip()
             cfg = comfy["cfg"]
             if cfg is None:
-                yield "⚠ ComfyUI連携の設定が無効です（上の設定状態を確認してください）", skip, skip
+                yield ["⚠ ComfyUI連携の設定が無効です（上の設定状態を確認してください）", skip, skip, skip]
                 return
             result = L.compile_view(repo, sc_v)
             if result is None:
-                yield "⚠ Situation / Scene を選んでください", skip, skip
+                yield ["⚠ Scene を開くか、Action を選んでください", skip, skip, skip]
                 return
             if not result.ok:
-                yield "❌ 検証エラーがあるため生成できません。\n\n" + L.issues_text(result.issues), skip, skip
+                yield ["❌ 検証エラーがあるため生成できません。\n\n" + L.issues_text(result.issues), skip, skip, skip]
                 return
-            done = None
-            try:
-                for ev in iter_run(cfg, result, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]):
-                    if isinstance(ev, Generation):
-                        done = ev
-                    else:
-                        yield f"⏳ {ev}", skip, skip
-            except ComfyError as e:
-                yield f"❌ {e}", skip, skip
-                return
-            except OSError as e:
-                yield f"❌ 画像のコピーに失敗しました：{e}", skip, skip
-                return
-            shots = [(Image.open(io.BytesIO(i.data)), f"{STAGE_LABEL[i.stage]}：{Path(i.record_path).name}")
-                     for i in done.images]
-            paths = "\n".join(f"- {STAGE_LABEL[i.stage]}：`{i.record_path}`" for i in done.images)
-            state = {"seed": done.seed, "images": [i.record_path for i in done.images],
-                     "moss_prompt": done.moss_prompt, "anima_prompt": done.anima_prompt,
-                     "negative_applied": done.negative_applied, "gen": done.gen}
-            used = f"\n\n使った値：{L.gen_summary(done.gen)}" if done.gen else ""
-            yield (f"✅ 完了　シード `{done.seed}`（MOSS段・Anima段で共通）{used}\n\n{paths}\n\n"
-                   "※ 保存ボタンを押すと、シードと画像のパスが Scene に記録されます"), shots, state
+            yield from stream(iter_run(cfg, result, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]))
 
-        reselect_btn.click(partial(on_pick, "situation", None), [nav], NAV_OUT, api_name="reselect")
+        def on_retry(sc_v, copy_dir, gp_v, gen_v):
+            """MOSS段が成功して Anima段が失敗したときだけ、Anima段のみを同じシードで再送する。"""
+            skip = gr.skip()
+            cfg = comfy["cfg"]
+            if cfg is None or not gen_v or gen_v.get("failed_stage") != "anima":
+                yield ["⚠ 再試行できるのは、MOSS段が成功して Anima段が失敗した生成だけです", skip, skip, skip]
+                return
+            result = L.compile_view(repo, sc_v)
+            if result is None or not result.ok:
+                yield ["❌ 検証エラーがあるため再試行できません", skip, skip, skip]
+                return
+            changed = differences(gen_v, result, effective_of(gp_v))
+            if changed:
+                yield ["⚠ 最初の生成から次の項目が変わっているため、Anima段だけの再試行はできません："
+                       + "、".join(changed) + "\n\n全体を「生成」し直してください", skip, skip, skip]
+                return
+            yield from stream(iter_retry_anima(cfg, result, gen_v, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]))
+
+        # ---- 配線 ----
+        pick_scene_btn.click(partial(on_pick, "scene", None), [nav], NAV_OUT, api_name="pick_scene")
+        pick_action_btn.click(partial(on_pick, "action", None), [nav], NAV_OUT, api_name="pick_action")
+        pick_bg_btn.click(partial(on_pick, "background", None), [nav], NAV_OUT, api_name="pick_background")
+        pick_save_btn.click(partial(on_pick, "savedir", None), [nav], NAV_OUT, api_name="pick_savedir")
+        setdir_btn.click(on_setdir, [nav], NAV_OUT, api_name="set_savedir")
         lst.input(on_browse, [lst, sc, nav], FULL, api_name="browse").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_browse")
         upload.upload(on_upload, [upload, sc, nav], FULL, api_name="upload").then(
@@ -304,6 +375,7 @@ def build_ui(repo: Repository,
                      api_name=f"gp_reset_{stage}_{param}")
         pick_dir_btn.click(on_pick_dir, [copy_dir_tb], [copy_dir_tb, gen_status], api_name="pick_dir")
         clear_dir_btn.click(lambda: "", None, [copy_dir_tb], api_name="clear_dir")
-        gen_btn.click(on_generate, [sc, copy_dir_tb, gp], [gen_status, gallery, gen], api_name="generate")
+        gen_btn.click(on_generate, [sc, copy_dir_tb, gp], GEN_OUT, api_name="generate")
+        retry_btn.click(on_retry, [sc, copy_dir_tb, gp, gen], GEN_OUT, api_name="retry")
 
     return demo

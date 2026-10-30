@@ -1,0 +1,10 @@
+id: beach_solo__elesa
+name: 海辺で日光浴（カミツレ）
+background: beach
+action: beach_solo
+cast:
+  solo:
+    character: elesa_bw
+    # outfit 省略 → Action の elesa_sling 指定が defaultOutfit に勝つ
+applyNegative: false
+# gen 省略 → ワークフローのノード値がそのまま使われる

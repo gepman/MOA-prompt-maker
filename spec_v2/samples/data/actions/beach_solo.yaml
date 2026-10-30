@@ -1,0 +1,18 @@
+id: beach_solo
+name: 海辺で日光浴（ソロ）
+tags: [水着]
+rating: sensitive
+background: beach
+slots: [solo]
+outfits:
+  solo: elesa_sling
+mossCaption: |
+  A single adult woman lies on her back on a beach towel, sunbathing with a relaxed expression.
+mossItems:
+  - label: object
+    caption: "{{solo}} {{solo.outfit}} {{solo.bodyHair}} She lies on her back on a beach towel with her eyes closed and a relaxed smile, her arms resting loosely at her sides."
+    bbox: [-260, -420, 300, 420]
+anima: |
+  {{solo}}, {{solo.outfit}}, {{solo.bodyHair}}, lying, on back, sunbathing, beach towel, eyes closed, relaxed, smile
+negativeAnima: |
+  standing, sitting

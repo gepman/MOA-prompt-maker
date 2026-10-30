@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background.schema.json",
+  "title": "Background",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "canvas",
+    "mossCaption",
+    "anima"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rating": {
+      "type": "string",
+      "enum": [
+        "safe",
+        "sensitive",
+        "explicit"
+      ],
+      "default": "safe"
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "w",
+        "h"
+      ],
+      "properties": {
+        "w": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "metaTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "mossCaption": {
+      "type": "string",
+      "description": "MOSS summary の背景部分。背景だけを完全な文で書く。プレイスホルダー不可"
+    },
+    "mossItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "caption",
+          "bbox"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caption": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "integer"
+            },
+            "description": "[y_min, x_min, y_max, x_max]。キャンバス中心原点のピクセル座標（abs_centralized / yxyx）"
+          }
+        }
+      },
+      "default": [],
+      "description": "情景オブジェクト。プレイスホルダー不可"
+    },
+    "anima": {
+      "type": "string",
+      "description": "情景タグ。プレイスホルダー不可"
+    },
+    "negativeMoss": {
+      "type": "string"
+    },
+    "negativeAnima": {
+      "type": "string"
+    }
+  }
+}

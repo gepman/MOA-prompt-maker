@@ -1,0 +1,45 @@
+{
+  "summary": {
+    "meta": [
+      "anime illustration",
+      "safe",
+      "beach scene"
+    ],
+    "canvas": "single",
+    "caption": "A sunny beach in the daytime, with the blue sea stretching to the horizon, gentle waves along the shoreline, wet sand and a clear sky with a few white clouds. A woman smiles and waves at a small boy standing in front of her, who waves back happily."
+  },
+  "items": [
+    {
+      "label": "object",
+      "caption": "The sea and the shoreline, with gentle waves, wet sand and the horizon under a clear blue sky.",
+      "bbox": [
+        -512,
+        -768,
+        -80,
+        768
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "Elesa as she appears in Pokemon Black and White, an adult woman with very long straight blonde hair and blunt bangs, blue-grey eyes, a tall model figure and extremely huge breasts. She wears huge black over-ear headphones with yellow accents and thin antenna cables. She wears a black short-sleeved cropped knitted sweater and a separate black short skirt, with bare midriff and bare thighs, and black flat shoes. She smiles and waves one hand at the boy.",
+      "bbox": [
+        -460,
+        -520,
+        480,
+        80
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "A small boy in a white T-shirt and blue shorts waves back with a big smile.",
+      "bbox": [
+        40,
+        180,
+        480,
+        480
+      ]
+    }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}

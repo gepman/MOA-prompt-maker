@@ -1,0 +1,19 @@
+id: elesa_bw
+name: カミツレ（BW版）
+group: elesa
+tags: [ポケモン, BW]
+defaultOutfit: elesa_bw_summer
+# sex は省略 = female（デフォルト）
+moss: |
+  Elesa as she appears in Pokemon Black and White, an adult woman with very long straight blonde hair and blunt bangs, blue-grey eyes, a tall model figure and extremely huge breasts. She wears huge black over-ear headphones with yellow accents and thin antenna cables.
+anima: |
+  elesa (pokemon), pokemon, blonde hair, long hair, blunt bangs, blue eyes, headphones, huge breasts
+# sensitive 用途向けのデフォルト（髪色と同じ薄い陰毛、2026-10-31 のルール）
+bodyHairMoss: |
+  She has sparse thin blonde pubic hair.
+bodyHairAnima: |
+  sparse pubic hair, blonde pubic hair
+negativeMoss: |
+  short hair
+negativeAnima: |
+  short hair

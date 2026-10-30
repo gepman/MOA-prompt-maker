@@ -1,0 +1,18 @@
+id: beach_wave_boy
+name: 海辺で男の子に手を振る（1人＋モブ）
+tags: [日常, モブあり]
+rating: safe
+background: beach
+slots: [girl]
+extras: { male: 1 }   # 手を振り返す男の子を人数に数える → 1girl, 1boy（solo は付かない）
+mossCaption: |
+  A woman smiles and waves at a small boy standing in front of her, who waves back happily.
+mossItems:
+  - label: object
+    caption: "{{girl}} {{girl.outfit}} She smiles and waves one hand at the boy."
+    bbox: [-460, -520, 480, 80]
+  - label: object
+    caption: "A small boy in a white T-shirt and blue shorts waves back with a big smile."
+    bbox: [40, 180, 480, 480]
+anima: |
+  {{girl}}, {{girl.outfit}}, waving, smile, child, t-shirt, looking at another

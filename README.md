@@ -1,12 +1,27 @@
 # MOA-prompt-maker（MOSS/Anima プロンプトビルダー）
 
-過去に作った画像生成プロンプトの**キャラクターと服装だけを差し替えて再利用**するためのツールです。
-キャラを変えると、MOSS 用の JSON と Anima 用のタグ列が両方とも自動で作り直され、
+過去に作った画像生成プロンプトについて、**キャラクター・服装・背景・行為を入れ替えて再利用**するためのツールです。
+キャラや背景を変えると、MOSS 用の JSON と Anima 用のタグ列が両方とも自動で作り直され、
 ComfyUI に送って MOSS → Anima の2段で画像まで生成できます。
 
 - データは人が読んで手で編集できる YAML ファイル群です
 - 画面は「シーン組み立て画面」1つだけ（Python + Gradio）
-- 仕様の詳細は [`spec/SPEC.md`](spec/SPEC.md)（v1.2）にあります
+- **現行の仕様は [`spec_v2/SPEC.md`](spec_v2/SPEC.md)（v2.0）** です。[`spec/`](spec/) は旧版（v1.5）で、参照用と移行テストの入力として残しています
+
+## v2 の考え方
+
+v1.x の「Situation」を **Background（背景）** と **Action（行為）** に分けました。
+Scene が、Background・Action・キャスト（キャラと服装）を選んで組み合わせます。
+
+| エンティティ | 意味 | ルート |
+|---|---|---|
+| Character | キャラクター（1キャラ＝1形態につき1ファイル） | `characters/` |
+| Outfit | 服装（キャラとは独立） | `outfits/` |
+| Background | 背景。解像度、背景の文章、情景オブジェクト（bbox）、情景タグ | `backgrounds/` |
+| Action | 行為。スロット、行為の文章、キャラのアイテム（bbox）、Anima テンプレート | `actions/` |
+| Scene | Background ＋ Action ＋ キャスト割当。コンパイル結果を保持する | `scenes/` |
+
+品質タグ・rating タグ・人数タグ（`1girl, solo` など）・`summary.meta` は、コンパイラが組み立てます。ファイルには書きません。
 
 ## セットアップ
 
@@ -27,79 +42,93 @@ python -m venv .venv
 
 | オプション | 既定値 | 内容 |
 |---|---|---|
-| `--data` | `data` | データフォルダ（`characters/` `outfits/` `situations/` を含む） |
+| `--data` | `data` | データフォルダ（上の5つのルートを含む） |
 | `--config` | `config.yaml` | ComfyUI 連携の設定ファイル |
 | `--comfy-url` | （設定ファイルの値） | ComfyUI の URL。設定ファイルより優先 |
-| `--host` / `--port` | `127.0.0.1` / `7860` | 待ち受けるアドレスとポート |
+| `--host` / `--port` | `127.0.0.1` / `7860` | 待ち受けるアドレスとポート（他端末から開くときは `--host 0.0.0.0`） |
 
 まず試すだけなら、同梱のサンプルデータで起動できます。
 **保存すると YAML が書き換わる**ので、サンプルを触りたくないときはコピーしたフォルダを指定してください。
 
 ```powershell
-.\.venv\Scripts\python app.py --data spec/samples/data
+.\.venv\Scripts\python app.py --data spec_v2/samples/data
 ```
 
 ## 使い方
 
-1. 左の一覧から **Situation**（場面のテンプレート）を選びます。既存の **Scene** を選ぶと、その内容を開きます。
-   フォルダは `_folder.yaml` の表示名で表示され、クリックで1階層ずつ移動できます。
+1. 左の一覧から **Scene を開く**か、**Action を選んで**新規に作ります（右の「📂 Scene を開く」「🎬 Action を選ぶ」）。
+   一覧はフォルダを1階層ずつ移動できます。フォルダ名は `_folder.yaml` の表示名です。
    「YAMLファイルを指定」で、ファイルを直接選ぶこともできます（YAML の `id` から `data/` 内の元ファイルを特定します）。
-2. Situation の `slots` の数だけ、右にキャスト枠が出ます。枠の「キャラを選ぶ」「服装を選ぶ」を押すと、
-   左の一覧がその選択先に切り替わるので、そこから選びます。
-3. 服装は **未指定（継承）／none／個別の服装** から選びます。
-   未指定のときは、Scene → Situation → キャラの `defaultOutfit` の順で解決されます。
-   枠には、実際に使われる服装の出どころが表示されます。
-4. 下の欄に、MOSS JSON・Anima プロンプト・ネガティブが表示されます（コピーボタン付き）。
+2. Action を選ぶと、その **推奨背景** が Background の初期選択になります。推奨背景がなければ未選択なので、
+   「🏞 Background を選ぶ」で選びます。Background はいつでも選び直せて、**自分で選んだ背景が常に優先**です
+   （Action を選び直しても変わりません）。
+3. Action の `slots` の数だけ、キャスト枠が出ます。枠の「キャラを選ぶ」「服装を選ぶ」を押すと、左の一覧がその選択先に
+   切り替わるので、そこから選びます。Action を選び直したときは、同名スロットのキャストと服装を引き継ぎます。
+4. 服装は **未指定（継承）／none／個別の服装** から選びます。未指定のときは、
+   Scene → Action → キャラの `defaultOutfit` の順で解決され、枠には出どころが表示されます
+   （例：「未指定（アクション指定：guilty_suit_pink）」「未指定（キャラ既定：skyla_pilot）」）。
+5. 下の欄に、MOSS JSON・Anima プロンプト・ネガティブ、実効 rating と人数タグが表示されます（コピーボタン付き）。
+   bbox のはみ出しや、Action に書かれた人数タグの除去などの警告も一覧に出ます。
    ネガティブの適用は既定で OFF で、OFF でも合成結果は参考表示されます。
-5. 「🎨 生成」で ComfyUI に送信します。完了すると、MOSS 段と Anima 段の画像が表示されます。
-   生成ボタンの上のスライダーで、**生成パラメータ**（MOSS 段の steps / cfg、Anima 段の steps / cfg / denoise）を Scene ごとに変えられます。
-   各項目に「出どころ」（Scene / ワークフロー）が表示され、**動かした項目だけ**が Scene の `gen` に保存されます。
-   動かしていない項目は、ワークフローの値が使われます。「↩ ワークフローの値に戻す」で、その項目を `gen` から外せます。
-6. 一番下の **保存** で Scene を保存します。
+6. 「🎨 生成」で ComfyUI に送信します（下の「ComfyUI 連携」）。
+7. 一番下の **保存** で Scene を保存します。
+
+ビルダーは Background / Action を編集しません。直すときは YAML を直接編集して、「🔄 データ再読み込み」を押してください。
 
 ### Scene の保存ルール
 
 保存ボタンは誤操作を避けるため、画面の一番下にあります。
 
-- **Scene 名が空**：`<名前>_1`、`<名前>_2` … と番号を付けて**新規保存**します。既存の Scene は上書きしません。
-- **既存と同じ Scene 名を入力**：そのときだけ**上書き**します。
-- 保存先は、Situation と同じフォルダの `<situation id>__<Scene名>.yaml` です。
-- 生成した画像のパスとシードは、**保存したときに** `compiled.images` と `compiled.seed` に記録されます。
-  生成後にキャストやスライダーを変えた場合は、内容が食い違うため記録されません。
-  生成時に**実際に使った値**（ワークフローから継承した分も含む全項目）は `compiled.gen` に記録されます。
+- **id が空**：`<名前>_1`、`<名前>_2` … と番号を付けて**新規保存**します。名前は、開いている Scene があればその id（末尾の `_数字` は除く）、
+  なければ `<Action の id>__scene` です。既存の Scene は上書きしません。
+- **既存と同じ id を入力**：そのときだけ**上書き**します（その Scene が今ある場所に保存します）。
+- 新規保存の保存先は、「📁 保存先フォルダを選ぶ」で `scenes/` 配下から選びます（左の一覧でフォルダを開き、「📍 このフォルダを保存先にする」）。
+  既定は `scenes/` 直下です。保存したら、保存先のフルパスを表示します。
+- 検証エラーがあるときは保存しません。
+- 生成した画像のパスとシードは、**保存したときに** `compiled` に記録されます。
+  生成時と保存時で食い違う項目があると記録されず、**食い違った項目名**が表示されます（下の「ComfyUI 連携」）。
 
 ## データの置き方
 
-実データは `data/` に置きます（`spec/samples/` はテスト用のサンプルです）。
+実データは `data/` に置きます（`spec_v2/samples/` はテスト用のサンプルです）。
 
 ```
 data/
   characters/   キャラクター（任意の深さのフォルダ可）
   outfits/      服装
-  situations/   Situation と Scene
+  backgrounds/  背景
+  actions/      行為
+  scenes/       Scene
 ```
 
-- フォルダの階層は整理のための棚です。参照はすべて `id` で行うので、フォルダを移動・改名しても壊れません。
-- ファイル名は `id` と一致させます（`skyla_bw.yaml` なら `id: skyla_bw`）。
+- フォルダの階層は整理のための棚です。参照はすべて `id` で行うので、エクスプローラーでフォルダを移動・改名しても壊れません。
+- ファイル名は `<id>.yaml`。`id` は**同じルートの中で**一意です（ルートが違えば同じ `id` でもかまいません）。
 - フォルダには `_folder.yaml` を置けます（表示名 `name`、並び順 `order`）。なくても動きます。
 - 並び順は、ファイル名の自然順（数字を数として読む）です。順番を付けたいときは `01_` のような番号をファイル名に付けます。
-- `situations/` の中では、`situation` と `cast` の両方のキーを持つファイルが Scene、持たないものが Situation です。
-- YAML の形式は `spec/schemas/*.schema.json` が正本です。サンプルは `spec/samples/data/` を参照してください。
-- YAML を手で編集したら、画面の「🔄 データ再読み込み」を押します。検証のエラーと警告は画面に表示されます。
+- 名前が `_` または `.` で始まる**フォルダ**は読み込みません（下書き置き場に使えます）。
+- YAML の形式は `spec_v2/schemas/*.schema.json` が正本です。サンプルは `spec_v2/samples/data/` を参照してください。
 
-Situation の `mossPrompt` と `animaPrompt` には、次のプレイスホルダーを書きます。
+### プレイスホルダー
+
+Action の `mossCaption`、`mossItems[].caption`、`anima` の中で使えます（**Background では使えません**）。
 
 | 書式 | 意味 |
 |---|---|
 | `{{left}}` | `left` スロットのキャラクター |
 | `{{left.outfit}}` | `left` スロットに解決された服装 |
-| `{{left.bodyHair}}` | `left` スロットのキャラクターの体毛（キャラの `bodyHairMoss` / `bodyHairAnima`。無ければ空） |
+| `{{left.bodyHair}}` | `left` スロットのキャラクターの体毛（`bodyHairMoss` / `bodyHairAnima`。無ければ空） |
 
-MOSS 用か Anima 用かは書きません。`mossPrompt` の中では MOSS 用の文章に、`animaPrompt` の中では Anima 用のタグに自動で置き換わります。
+MOSS 用か Anima 用かは書きません。MOSS 側では MOSS 用の文章に、Anima 側では Anima 用のタグに自動で置き換わります。
+体毛や服装が無いときは空文字になり、エラーにはなりません（MOSS は空白、Anima は空タグ・連続カンマを整えます）。
+`bodyHairMoss` と服装の `moss` は、主語を含む**完全な文**で書きます（例：`She has sparse thin brown pubic hair.`）。
+`{{left.bodyHair}}` は単独の文の位置に置くと、あれば文として溶け込み、なければ文ごと消えます。
 
-`{{left.bodyHair}}` は、キャラに体毛が無いと空文字になり、エラーにはなりません（MOSS は空白、Anima は空タグ・連続カンマを整えます）。
-キャラの `bodyHairMoss` は、服装の moss と同じく**完全な文**で書きます（例：`She has sparse thin brown pubic hair.`）。
-`{{left.bodyHair}}` は単独の文の位置に置くと、体毛があれば文として溶け込み、なければ文ごと消えます。
+### 人数タグと solo
+
+キャストの `sex`（`female` / `male`、省略時 `female`）と Action の `extras`（キャスト以外に描く人物の人数）から、
+コンパイラが `1girl, solo` や `2girls, 1boy` を付けます。Action や Background の anima に書かれた人数タグ・`solo` は、
+コンパイル時に除去して警告します（キャラ・服装のブロック内は除去しません）。
+キャスト以外の特定の人物（例：説明を聞いている男の子）は、Action に `extras: { male: 1 }` のように書くと、人数タグに数えられます。
 
 ## ComfyUI 連携
 
@@ -109,7 +138,7 @@ MOSS 用か Anima 用かは書きません。`mossPrompt` の中では MOSS 用�
 comfyui:
   url: http://127.0.0.1:8188
   workflow: workflow/moss_to_anima_i2i_api_v1.1.json   # API 形式で保存したワークフロー
-  timeoutSec: 600
+  timeoutSec: 600      # 段ごとの待ち時間の上限
   outputDir: null      # ComfyUI の output フォルダ。指定すると記録するパスが絶対パスになる
 nodes:                 # 値を差し込むノード（node は API 形式 JSON のキー）
   mossPositive: {node: "4", input: text}
@@ -132,11 +161,52 @@ outputs:               # 画像を取得する保存ノード
   ```
 
 - 設定がワークフローと合っていない（ノードや入力名が存在しない等）と、画面にその理由が出て、生成ボタンは押せません。
-- **シード**：生成ごとにランダムな値を1つ決め、`nodes.seed` のすべてに同じ値を入れます。
+- **画像のサイズ**は、Scene の Background の `canvas` が入ります（16の倍数でなければ警告）。
+- **シード**：生成ごとに `0〜4294967295` のランダムな値を1つ決め、`nodes.seed` のすべて（MOSS 段と Anima 段）に同じ値を入れます。
+  ワークフロー側の seed 入力にもっと小さい上限があれば、小さい方を上限にします。範囲外なら生成を始めません。
 - **ネガティブ**：適用 ON のときだけ、合成したネガティブでノードを置き換えます。OFF のときはワークフローに書かれた既定をそのまま使います。
+- **生成パラメータ**（`gen`）：MOSS 段の steps / cfg、Anima 段の steps / cfg / denoise を、項目ごとのスライダーで変えられます。
+  各項目に「出どころ」（Scene / ワークフロー）が表示され、**動かした項目だけ**が Scene の `gen` に保存されます。
+  「↩ ワークフローの値に戻す」で、その項目を `gen` から外せます。
+- **生成の流れ**：通常は MOSS → Anima を1つのプロンプトで送ります。段ごとに `timeoutSec` の制限があり、超えたらその段の失敗として中断します
+  （他のジョブのキュー待ちの時間は数えません）。
+  - **MOSS 段の失敗**：画像は記録されません。シードは破棄し、再生成では新しいシードを使います。
+  - **Anima 段の失敗（MOSS 段は成功）**：MOSS 画像を残して表示し、Anima 枠は「失敗」になります。
+    「🔁 Anima段だけ再試行」で、MOSS 画像を入力にして Anima 段だけを、**同じシード・同じ `gen`** で再送できます
+    （MOSS 段は再実行しません。MOSS 画像を一度 PNG（8bit）で読み直すため、通常の生成とは画がわずかに違うことがあります）。
+    再試行は、最初の生成から内容が変わっていないときだけできます。
 - **画像の記録先**：既定では ComfyUI 側のパス（`output/...`）を記録します。
   「📁 フォルダを選ぶ」でコピー先を指定すると、そこへ画像を保存し、コピー先のパスを記録します。
   `compiled.images` の並びは **MOSS 段 → Anima 段** です。
+- **記録の条件**：保存時に、`mossPrompt`・`animaPrompt`・ネガティブ適用（ON なら合成ネガティブも）・Background / Action の id・`canvas`・
+  `gen` の実効値が、生成時とすべて一致していれば `compiled.seed` / `images` / `gen` に記録されます。
+  1つでも違うと記録されず、違った項目名が表示されます。MOSS 段だけの結果は `compiled.partial: true` で記録できます。
+
+## v1.x のデータの移行
+
+v1.x（Situation 形式）のデータは、移行ツールで v2 に変換できます。**元のフォルダは一切変更せず**、結果は新しいフォルダに書きます
+（`--out` が存在して空でなければ中止します）。
+
+```powershell
+.\.venv\Scripts\python -m moa.migrate_v2 --src <v1.x の data フォルダ> --out <新しいフォルダ>
+```
+
+- `characters/` と `outfits/` はそのままコピーします（`sex` は書き足しません＝ female 扱い）。
+- Situation 1つが、Background 1つ（id は `<id>_bg`）と Action 1つ（id は元の id）に機械的に分割されます。
+  Scene は `scenes/` に移り、`cast` と `outfits` が1つにまとまります。
+- Scene の `compiled.seed` が v2 の範囲（0〜4294967295）の外のとき（v1.x のアプリは 2^53 までの値を書いていました）は、
+  別の値には直せない（その値では画像を再現できない）ので、`null` にして、元の値を YAML のコメントとレポートに残します。画像のパスは保持します。
+- **`<新しいフォルダ>/MIGRATION_REPORT.md`** に、手作業が必要なものと、移行前後のコンパイル結果の差分が出ます。
+  特に次を確認してください。
+  - Action の anima に残った人数タグ・`solo`（v2 ではコンパイル時に除去されます）。**特定のモブを表すもの（例 `1boy`）は、`extras` を手で設定する必要があります**。
+  - `3children` のような人数を表していそうなタグ。キャスト1人の Action では、`extras.others` を設定しないと誤って `solo` が付きます。
+  - v1.x で人数タグを書いていなかった Action には、v2 で `1girl` などが新しく付きます。
+  - summary.caption の背景／行為への書き分けは、機械移行では行いません（全文が Action に入ります）。任意の作業で、しなくても動きます。
+- 移行後のデータは、そのままアプリで使えます。
+
+  ```powershell
+  .\.venv\Scripts\python app.py --data <新しいフォルダ>
+  ```
 
 ## テスト
 
@@ -144,20 +214,23 @@ outputs:               # 画像を取得する保存ノード
 .\.venv\Scripts\python -m pytest -q
 ```
 
-- 受け入れテスト（SPEC 11章）は `tests/test_acceptance.py` で、`spec/samples/examples/` の出力と一致することを確認します。
-- ComfyUI 連携のテストは、実物ではなく、テスト内で立てる偽のサーバーを相手にします。ComfyUI を起動していなくても通ります。
+- 受け入れテスト（SPEC v2 の11章）は `tests/test_acceptance.py` で、`spec_v2/samples/examples/` の出力と一致することを確認します。
+  移行（11章の15）は `tests/test_migrate.py` で、旧サンプル（`spec/samples/data`）を移行して、v1.5 の出力と完全一致することを確認します。
+- ComfyUI 連携のテストは、実物ではなく、テスト内で立てる偽のサーバーとスクリプト化したイベントを相手にします。ComfyUI を起動していなくても通ります。
 
 ## 構成
 
 ```
 app.py              起動スクリプト
 config.yaml         ComfyUI 連携の設定
-data/               実データ（characters / outfits / situations）
+data/               実データ（characters / outfits / backgrounds / actions / scenes）
 workflow/           ComfyUI の API 形式ワークフロー
 moa/
   core/             コンパイル処理（Gradio に依存しない）
   comfy/            ComfyUI 連携（設定・クライアント・生成・ノード割り当ての推定）
+  migrate_v2/       v1.x からの移行ツール
   ui/               Gradio の画面
-spec/               仕様書・JSON Schema・サンプル
+spec_v2/            現行の仕様書（v2.0）・JSON Schema・サンプル
+spec/               旧版（v1.5）の仕様書・サンプル（移行テストの入力として使用）
 tests/              pytest
 ```

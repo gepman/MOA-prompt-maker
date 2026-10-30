@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 
-from .constants import BASE_NEGATIVE_ANIMA, BASE_NEGATIVE_MOSS, PLACEHOLDER_RE
-from .models import CompileResult, Issue, Scene, SlotResolution, has_error
+from .constants import (BASE_NEGATIVE_ANIMA, BASE_NEGATIVE_MOSS, META_BASE, MOSS_BBOX_FORMAT, MOSS_CANVAS,
+                        MOSS_COORD_SPACE, PLACEHOLDER_RE, QUALITY_TAGS, RATINGS)
+from .models import CompileResult, MossItem, Scene, SlotResolution, has_error
+from .people import people_tags, strip_template_count_tags
 from .repository import Repository
 from .resolve import resolve_outfit
 from .textutil import clean_tags, collapse_ws, join_negative, strip_block
-from .validate import validate_scene, validate_situation
+from .validate import scene_issues
 
 
 def _substitute(text: str, blocks: dict[str, dict[str, str]]) -> str:
@@ -22,38 +24,43 @@ def _substitute(text: str, blocks: dict[str, dict[str, str]]) -> str:
     return PLACEHOLDER_RE.sub(repl, text)
 
 
-def _walk_moss(node, blocks):
-    if isinstance(node, str):
-        if PLACEHOLDER_RE.search(node):
-            return collapse_ws(_substitute(node, blocks))
-        return node
-    if isinstance(node, list):
-        return [_walk_moss(v, blocks) for v in node]
-    if isinstance(node, dict):
-        return {k: _walk_moss(v, blocks) for k, v in node.items()}
-    return node
+def effective_rating(*ratings: str) -> str:
+    """厳しい方を採用する（safe < sensitive < explicit）。"""
+    return max(ratings, key=RATINGS.index)
+
+
+def build_meta(rating: str, *tag_lists: list[str]) -> list[str]:
+    """`["anime illustration", rating] + Background.metaTags + Action.metaTags`。重複は先勝ち（完全一致）。"""
+    merged = [META_BASE, rating]
+    for tags in tag_lists:
+        merged += tags
+    return list(dict.fromkeys(merged))
+
+
+def _item(it: MossItem, blocks: dict[str, dict[str, str]]) -> dict:
+    return {"label": it.label, "caption": collapse_ws(_substitute(it.caption, blocks)), "bbox": list(it.bbox)}
 
 
 def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
-    result = CompileResult(scene_id=scene.id, situation_id=scene.situation,
+    result = CompileResult(scene_id=scene.id, background_id=scene.background, action_id=scene.action,
                            apply_negative=scene.apply_negative)
-    sit = repo.situation(scene.situation)
-    if sit is None:
-        result.issues.append(Issue("error", f"Situation '{scene.situation}' が存在しません"))
+    bg, action = repo.background(scene.background), repo.action(scene.action)
+    if bg is not None:
+        result.canvas = dict(bg.canvas)
+    result.issues = scene_issues(repo, scene)
+    if has_error(result.issues):  # エラーがあればコンパイル結果を出さない（警告は返す）
         return result
 
-    result.canvas = dict(sit.canvas)
-    result.issues = validate_situation(repo, sit) + validate_scene(repo, scene)
-    if has_error(result.issues):
-        return result
+    result.rating = effective_rating(bg.rating, action.rating)
 
+    # 5.2章：服装の解決と、スロットごとのブロック（前後の空白を除去してから使う）
     moss_blocks: dict[str, dict[str, str]] = {}
     anima_blocks: dict[str, dict[str, str]] = {}
-    outfits = []
-    chars = []
-    for slot in sit.slots:
-        char = repo.character(scene.cast[slot])
-        res = resolve_outfit(slot, scene.outfits, sit.outfits, char.default_outfit)
+    chars, outfits = [], []
+    for slot in action.slots:
+        entry = scene.cast[slot]
+        char = repo.character(entry.character)
+        res = resolve_outfit(slot, entry.outfit, action.outfits, char.default_outfit)
         outfit = repo.outfit(res.outfit_id) if res.outfit_id else None
         moss_blocks[slot] = {"character": strip_block(char.moss),
                              "outfit": strip_block(outfit.moss) if outfit else "",
@@ -66,18 +73,39 @@ def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
             outfits.append(outfit)
         result.slots.append(SlotResolution(slot, char.id, res.outfit_id, res.source))
 
-    # MOSS: JSONとしてパースしてから、文字列値の中だけを置換する
-    tree = _walk_moss(json.loads(sit.moss_prompt), moss_blocks)
-    result.moss_prompt = json.dumps(tree, indent=2, ensure_ascii=False)
+    # 7.4章：人数タグと solo。キャストの sex ＋ extras
+    girls = sum(c.sex == "female" for c in chars) + action.extras.get("female", 0)
+    boys = sum(c.sex == "male" for c in chars) + action.extras.get("male", 0)
+    ptags = people_tags(girls, boys, action.extras.get("others", 0))
+    result.people_tags = ", ".join(ptags)
 
-    # Anima: 文字列置換 → 空タグ・連続カンマのみ除去（重複タグは残す）
-    result.anima_prompt = clean_tags(_substitute(sit.anima_prompt, anima_blocks))
+    # 7.5章 MOSS：summary.caption は Background → Action の順。片方が空ならもう一方だけ
+    captions = [collapse_ws(strip_block(bg.moss_caption)),
+                collapse_ws(_substitute(strip_block(action.moss_caption), moss_blocks))]
+    moss = {
+        "summary": {
+            "meta": build_meta(result.rating, bg.meta_tags, action.meta_tags),
+            "canvas": MOSS_CANVAS,
+            "caption": " ".join(c for c in captions if c),
+        },
+        "items": [_item(it, {}) for it in bg.moss_items] + [_item(it, moss_blocks) for it in action.moss_items],
+        "bbox_coord_space": MOSS_COORD_SPACE,
+        "bbox_format": MOSS_BBOX_FORMAT,
+    }
+    result.moss_prompt = json.dumps(moss, indent=2, ensure_ascii=False)
 
-    # ネガティブ: 全体ベース + キャラ全員 + 解決された服装 + Situation
+    # 7.5章 Anima：品質 → rating → 人数 → Action → Background。テンプレートの人数タグは展開前に除去する。
+    # 連結してから空タグ・連続カンマだけを除去する（重複タグは残す）
+    action_tags, _ = strip_template_count_tags(strip_block(action.anima))
+    bg_tags, _ = strip_template_count_tags(strip_block(bg.anima))
+    result.anima_prompt = clean_tags(", ".join(
+        [QUALITY_TAGS, result.rating, result.people_tags, _substitute(action_tags, anima_blocks), bg_tags]))
+
+    # 6章：全体ベース ＋ キャスト（スロット順）＋ 服装（スロット順）＋ Background ＋ Action
     result.negative_moss = join_negative(
-        [BASE_NEGATIVE_MOSS] + [c.negative_moss for c in chars]
-        + [o.negative_moss for o in outfits] + [sit.negative_moss])
+        [BASE_NEGATIVE_MOSS] + [c.negative_moss for c in chars] + [o.negative_moss for o in outfits]
+        + [bg.negative_moss, action.negative_moss])
     result.negative_anima = join_negative(
-        [BASE_NEGATIVE_ANIMA] + [c.negative_anima for c in chars]
-        + [o.negative_anima for o in outfits] + [sit.negative_anima])
+        [BASE_NEGATIVE_ANIMA] + [c.negative_anima for c in chars] + [o.negative_anima for o in outfits]
+        + [bg.negative_anima, action.negative_anima])
     return result

@@ -1,0 +1,13 @@
+id: white_background
+name: 白背景
+tags: [スタジオ]
+rating: safe
+canvas: { w: 1536, h: 1024 }
+mossCaption: |
+  A plain white background with soft, even studio lighting and no other objects.
+anima: |
+  white background, simple background
+negativeMoss: |
+  room, interior, furniture, scenery, outdoors, gradient background
+negativeAnima: |
+  scenery, outdoors, gradient background, gray background

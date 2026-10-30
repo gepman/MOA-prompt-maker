@@ -1,0 +1,19 @@
+id: beach_chat__trio
+name: 海辺で談笑（ポケモントリオ）
+background: beach
+action: beach_chat
+cast:
+  left:
+    character: skyla_bw
+    # outfit 省略 → Action 指定なし → defaultOutfit (skyla_pilot) が効く
+  center:
+    character: elesa_bw
+    outfit: none
+    # Scene の none が Action の elesa_bw_summer 指定に勝つ
+  right:
+    character: hex_maniac_xy
+    # outfit 省略 → Action 指定なし → defaultOutfit (hex_summer) が効く
+applyNegative: false
+gen:
+  moss: { steps: 50, cfg: 3.0 }
+  anima: { steps: 14, cfg: 1.8, denoise: 0.45 }

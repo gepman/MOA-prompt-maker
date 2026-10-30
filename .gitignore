@@ -2,6 +2,8 @@
 .venv/
 testdata/
 maindata/
+testdata_v2/
+maindata_v2/
 
 # 自動生成物
 __pycache__/

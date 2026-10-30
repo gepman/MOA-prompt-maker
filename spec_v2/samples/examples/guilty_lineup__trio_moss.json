@@ -1,0 +1,47 @@
+{
+  "summary": {
+    "meta": [
+      "anime illustration",
+      "safe",
+      "idol",
+      "unit lineup",
+      "costume swap"
+    ],
+    "canvas": "single",
+    "caption": "A plain white background with soft, even studio lighting and no other objects. Three adult women stand side by side in a row, full body, posing for a cheerful unit portrait in matching colour-coded phantom-thief stage costumes."
+  },
+  "items": [
+    {
+      "label": "object",
+      "caption": "Skyla as she appears in Pokemon Black and White, an adult woman with auburn red-brown hair in a high top ponytail with two small propeller hair ornaments, brown eyes and healthy tanned skin. Her waist is moderately thick and sturdy. She has enormous oversized breasts, far larger than natural, heavy and round. She wears a glossy sleeveless vivid pink phantom-thief stage costume: a vivid pink catsuit with a front zipper with a ring pull, an oval cutout at the side of the waist showing skin, a wide black belt with a silver heart-shaped buckle, a small black pouch on the belt, black long detached gloves, a short flared vivid pink skirt panel with black lace-up sides over the hips, and black thigh-high boots. She stands in a confident lineup pose with a bright energetic smile.",
+      "bbox": [
+        -500,
+        -740,
+        500,
+        -260
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "Elesa as she appears in Pokemon Black and White, a tall adult woman with very long straight blonde hair and blunt bangs, blue-grey eyes. She wears huge black over-ear headphones with yellow accents and thin antenna cables. Her waist is very slim and narrow like a fashion model's, clearly the slimmest waist of the three. She has enormous oversized breasts, far larger than natural, heavy and round. She wears a glossy sleeveless yellow phantom-thief stage costume: a yellow catsuit with a front zipper with a ring pull, an oval cutout at the side of the waist showing skin, a wide black belt with a silver heart-shaped buckle, a small black pouch on the belt, black long detached gloves, a short flared yellow skirt panel with black lace-up sides over the hips, and black thigh-high boots. She stands in a confident lineup pose with a confident elegant smile.",
+      "bbox": [
+        -500,
+        -240,
+        500,
+        240
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "A Hex Maniac as she appears in Pokemon X and Y, an adult woman with short messy black hair with a purple tint, a bob cut ending around her chin and shoulders, and swirling spiral eyes. Her waist is moderately thick and sturdy, slightly thicker than the other two. She has enormous oversized breasts, far larger than natural, heavy and round. She wears a glossy sleeveless medium deep blue phantom-thief stage costume: a medium deep blue catsuit with a front zipper with a ring pull, an oval cutout at the side of the waist showing skin, a wide black belt with a silver heart-shaped buckle, a small black pouch on the belt, black long detached gloves, a short flared medium deep blue skirt panel with black lace-up sides over the hips, and black thigh-high boots. She stands motionless with a vacant expressionless stare.",
+      "bbox": [
+        -500,
+        260,
+        500,
+        740
+      ]
+    }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}

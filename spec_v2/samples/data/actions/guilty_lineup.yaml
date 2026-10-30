@@ -1,0 +1,29 @@
+id: guilty_lineup
+name: セクギル並び立ち（ユニットポートレート）
+tags: [ポケモン, コスプレ]
+rating: safe
+background: white_background
+slots: [left, center, right]
+outfits:
+  left: guilty_suit_pink
+  center: guilty_suit_yellow
+  right: guilty_suit_blue
+metaTags: [idol, unit lineup, costume swap]
+mossCaption: |
+  Three adult women stand side by side in a row, full body, posing for a cheerful unit portrait in matching colour-coded phantom-thief stage costumes.
+mossItems:
+  - label: object
+    caption: "{{left}} {{left.outfit}} She stands in a confident lineup pose with a bright energetic smile."
+    bbox: [-500, -740, 500, -260]
+  - label: object
+    caption: "{{center}} {{center.outfit}} She stands in a confident lineup pose with a confident elegant smile."
+    bbox: [-500, -240, 500, 240]
+  - label: object
+    caption: "{{right}} {{right.outfit}} She stands motionless with a vacant expressionless stare."
+    bbox: [-500, 260, 500, 740]
+anima: |
+  {{left}}, {{center}}, {{right}}, {{left.outfit}}, {{center.outfit}}, {{right.outfit}}, standing, full body, lineup
+negativeMoss: |
+  duplicate, same face, wrong colors, kimono, japanese clothes, dress, cat ears, animal ears
+negativeAnima: |
+  1girl, 2girls, 4girls, duplicate, same face, wrong colors, kimono, japanese clothes, dress, cat ears, animal ears, man, boy

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "character.schema.json",
+  "title": "Character",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "moss",
+    "anima"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "group": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sex": {
+      "type": "string",
+      "enum": [
+        "female",
+        "male"
+      ],
+      "default": "female",
+      "description": "人数タグの集計に使う。省略時 female"
+    },
+    "defaultOutfit": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Outfitのid、または文字列 none（明示的に着せない）。null は不可"
+    },
+    "moss": {
+      "type": "string"
+    },
+    "anima": {
+      "type": "string"
+    },
+    "bodyHairMoss": {
+      "type": "string"
+    },
+    "bodyHairAnima": {
+      "type": "string"
+    },
+    "negativeMoss": {
+      "type": "string"
+    },
+    "negativeAnima": {
+      "type": "string"
+    }
+  }
+}

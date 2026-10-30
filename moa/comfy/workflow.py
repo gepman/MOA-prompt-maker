@@ -7,6 +7,7 @@ from collections import deque
 from moa.core.gen import GEN_PARAMS, clean_gen
 from moa.core.models import CompileResult
 
+from .client import ComfyError
 from .config import ComfyConfig, STAGES
 
 
@@ -47,6 +48,58 @@ def read_gen(wf: dict, cfg: ComfyConfig) -> dict:
     """送信するワークフローで実際に使われる生成パラメータ（継承分も含む全項目）。"""
     return {stage: {p: wf[cfg.samplers[stage]]["inputs"][p] for p in params}
             for stage, params in GEN_PARAMS.items() if cfg.has_sampler(stage)}
+
+
+# ---- Anima 段だけの再試行（13.4章）----
+def ancestors(wf: dict, roots: list[str]) -> set[str]:
+    """roots とその上流のすべてのノード id。"""
+    seen: set[str] = set()
+    stack = [r for r in roots if r in wf]
+    while stack:
+        nid = stack.pop()
+        if nid not in seen:
+            seen.add(nid)
+            stack += _upstream(wf, nid)
+    return seen
+
+
+def stage_boundary(wf: dict, cfg: ComfyConfig) -> tuple[str, str]:
+    """Anima 段が MOSS 段の画像を受け取る接続 `(ノード id, 入力名)`。
+
+    Anima の保存ノードの上流のうち MOSS 段に属さないノードで、MOSS 段のノードからの接続を持つ入力を探す
+    （この ComfyUI ワークフローでは VAEEncode の `pixels`）。1つに決まらなければ再試行できない。
+    """
+    moss_nodes = ancestors(wf, cfg.outputs["moss"])
+    anima_nodes = ancestors(wf, cfg.outputs["anima"])
+    edges = [(nid, name) for nid in sorted(anima_nodes - moss_nodes)
+             for name, v in wf[nid].get("inputs", {}).items() if _is_link(v) and v[0] in moss_nodes]
+    edges = [e for e in edges if e[1] in ("pixels", "image", "images")] or edges
+    if len(edges) != 1:
+        found = ", ".join(f"{n}.{i}" for n, i in edges) or "なし"
+        raise ComfyError("Anima 段だけの再試行には、Anima 段が MOSS 段の画像を受け取る接続が1つに決まる必要があります"
+                         f"（見つかった接続：{found}）")
+    return edges[0]
+
+
+def anima_only_workflow(wf: dict, cfg: ComfyConfig, moss_image: dict) -> dict:
+    """`apply()` 済みのワークフローから、Anima 段だけのワークフローを作る。
+
+    MOSS の保存ノードを除き、MOSS 段のサンプラーなどは送らない。Anima 段が MOSS の画像を受け取る入力を、
+    MOSS 画像を読む LoadImage に付け替える。画像は ComfyUI の output から直接読む（`"<subfolder/>名前 [output]"`）。
+    シード・gen・プロンプトは、渡された `wf`（最初の生成と同じ）のまま。
+    """
+    consumer, input_name = stage_boundary(wf, cfg)
+    out = copy.deepcopy(wf)
+    load_id = str(max([int(k) for k in out if k.isdigit()] + [0]) + 1)
+    sub = moss_image.get("subfolder") or ""
+    out[load_id] = {"class_type": "LoadImage",
+                    "inputs": {"image": f"{sub + '/' if sub else ''}{moss_image['filename']} [{moss_image.get('type') or 'output'}]"},
+                    "_meta": {"title": "MOSS画像（Anima段の再試行）"}}
+    out[consumer]["inputs"][input_name] = [load_id, 0]
+    for nid in cfg.outputs["moss"]:
+        out.pop(nid, None)
+    keep = ancestors(out, cfg.outputs["anima"])
+    return {k: v for k, v in out.items() if k in keep}
 
 
 # ---- 割り当て候補の推定 ----
@@ -193,3 +246,10 @@ def suggestion_to_yaml(s: dict) -> str:
     if s["notes"]:
         lines += ["", "# 注意"] + [f"# - {n}" for n in s["notes"]]
     return "\n".join(lines) + "\n"
+
+
+def effective_gen(cfg: ComfyConfig, overrides: dict | None) -> dict:
+    """Scene.gen の上書き → ワークフローの値 で解決した、全項目の実効値（13.4章の記録条件で比べる）。"""
+    over = clean_gen(overrides)
+    return {stage: {p: over.get(stage, {}).get(p, cfg.workflow_value(stage, p)) for p in params}
+            for stage, params in GEN_PARAMS.items() if cfg.has_sampler(stage)}

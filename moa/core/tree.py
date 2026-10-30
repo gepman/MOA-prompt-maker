@@ -32,10 +32,12 @@ def list_folder(repo: Repository, folder: Path) -> list[TreeItem]:
         return []
     items: list[TreeItem] = []
     for child in folder.iterdir():
-        if child.name.startswith("."):
-            continue
         if child.is_dir():
+            if child.name.startswith((".", "_")):  # 名前が `_` / `.` で始まるフォルダはスキャンしない（8章）
+                continue
             items.append(TreeItem("folder", f"📁 {folder_label(repo, child)}", child))
+        elif child.name.startswith("."):
+            continue
         elif child.suffix == ".yaml" and child.name != "_folder.yaml":
             entry = repo.by_path.get(child.resolve())
             if entry is not None:

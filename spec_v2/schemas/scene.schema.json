@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scene.schema.json",
+  "title": "Scene (v2)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "background",
+    "action",
+    "cast"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "background": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "action": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "cast": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z0-9_]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "character"
+        ],
+        "properties": {
+          "character": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "outfit": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+$",
+            "description": "Outfitのid、または文字列 none（明示的に着せない）。null は不可"
+          }
+        }
+      }
+    },
+    "applyNegative": {
+      "type": "boolean",
+      "default": false
+    },
+    "gen": {
+      "$ref": "#/$defs/gen"
+    },
+    "compiled": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "canvas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "w",
+            "h"
+          ],
+          "properties": {
+            "w": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "rating": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "sensitive",
+            "explicit"
+          ]
+        },
+        "mossPrompt": {
+          "type": "string"
+        },
+        "animaPrompt": {
+          "type": "string"
+        },
+        "negativeApplied": {
+          "type": "boolean"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "partial": {
+          "type": "boolean",
+          "description": "MOSS段の画像だけを記録した部分結果"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "steps": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "cfg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "denoise": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "gen": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "moss": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "steps": {
+              "$ref": "#/$defs/steps"
+            },
+            "cfg": {
+              "$ref": "#/$defs/cfg"
+            }
+          }
+        },
+        "anima": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "steps": {
+              "$ref": "#/$defs/steps"
+            },
+            "cfg": {
+              "$ref": "#/$defs/cfg"
+            },
+            "denoise": {
+              "$ref": "#/$defs/denoise"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+id: guilty_lineup__trio
+name: セクギルポケモン（ラインナップ）
+background: white_background
+action: guilty_lineup
+cast:
+  left:
+    character: skyla_guilty
+  center:
+    character: elesa_guilty
+  right:
+    character: hex_maniac_guilty
+    # outfit は全員省略 → Action のスロット別スーツ指定が効く
+applyNegative: false
+gen:
+  moss: { steps: 50, cfg: 3.0 }
+  anima: { steps: 14, cfg: 1.8, denoise: 0.45 }

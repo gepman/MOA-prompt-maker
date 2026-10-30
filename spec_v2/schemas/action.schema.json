@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action.schema.json",
+  "title": "Action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "slots",
+    "mossCaption",
+    "mossItems",
+    "anima"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rating": {
+      "type": "string",
+      "enum": [
+        "safe",
+        "sensitive",
+        "explicit"
+      ],
+      "default": "safe"
+    },
+    "background": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "推奨背景（Scene作成時の初期値のみ）"
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]+$"
+      }
+    },
+    "outfits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]+$",
+        "description": "Outfitのid、または文字列 none（明示的に着せない）。null は不可"
+      },
+      "description": "スロットごとの服装指定。キー省略=委譲"
+    },
+    "extras": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "キャスト以外に、特定の人物として描く登場人物（モブ等）の人数",
+      "properties": {
+        "female": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "male": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "others": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "性別タグを付けない人物（子ども・不特定の人など）。人数タグは作らず、solo の判定にだけ数える"
+        }
+      }
+    },
+    "metaTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "mossCaption": {
+      "type": "string",
+      "description": "MOSS summary の行為部分。プレイスホルダー可"
+    },
+    "mossItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "caption",
+          "bbox"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caption": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "integer"
+            },
+            "description": "[y_min, x_min, y_max, x_max]。キャンバス中心原点のピクセル座標（abs_centralized / yxyx）"
+          }
+        }
+      }
+    },
+    "anima": {
+      "type": "string",
+      "description": "Animaテンプレート。プレイスホルダー可。品質・rating・人数タグは書かない"
+    },
+    "negativeMoss": {
+      "type": "string"
+    },
+    "negativeAnima": {
+      "type": "string"
+    }
+  }
+}

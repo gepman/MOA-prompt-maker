@@ -1,0 +1,11 @@
+id: guilty_suit_pink
+name: セクギルスーツ（桃）
+tags: [ポケモン, セクギル]
+moss: |
+  She wears a glossy sleeveless vivid pink phantom-thief stage costume: a vivid pink catsuit with a front zipper with a ring pull, an oval cutout at the side of the waist showing skin, a wide black belt with a silver heart-shaped buckle, a small black pouch on the belt, black long detached gloves, a short flared vivid pink skirt panel with black lace-up sides over the hips, and black thigh-high boots.
+anima: |
+  pink catsuit, stage costume, phantom thief costume, catsuit, sleeveless, front zipper, belt, heart buckle, belt pouch, detached gloves, black gloves, miniskirt, lace-up, thigh boots, black boots
+negativeMoss: |
+  yellow catsuit, blue catsuit
+negativeAnima: |
+  yellow catsuit, blue catsuit

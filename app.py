@@ -9,7 +9,7 @@ from moa.ui.app import build_ui
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="MOSS/Anima プロンプトビルダー")
-    ap.add_argument("--data", default="data", help="データフォルダ（characters/ outfits/ situations/ を含む）")
+    ap.add_argument("--data", default="data", help="データフォルダ（characters/ outfits/ backgrounds/ actions/ scenes/ を含む）")
     ap.add_argument("--config", default="config.yaml", help="ComfyUI連携の設定ファイル")
     ap.add_argument("--comfy-url", default=None, help="ComfyUIのURL（config.yaml の comfyui.url より優先）")
     ap.add_argument("--host", default="127.0.0.1")

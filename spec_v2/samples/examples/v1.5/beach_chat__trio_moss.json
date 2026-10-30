@@ -1,0 +1,45 @@
+{
+  "summary": {
+    "meta": [
+      "anime illustration",
+      "safe",
+      "beach scene"
+    ],
+    "canvas": "single",
+    "caption": "Anime illustration at a sunny beach: three adult women standing on the sand by the sea, chatting and laughing together in a friendly conversation."
+  },
+  "items": [
+    {
+      "label": "object",
+      "caption": "Skyla as she appears in Pokemon Black and White, an adult woman with auburn red-brown hair tied in a high top ponytail with two small propeller hair ornaments, brown eyes, lightly tanned skin and extremely huge breasts. She wears a light-blue sleeveless pilot crop top with dark harness straps, light-blue shorts, a brown belt, blue gloves and brown boots. She laughs with her mouth open, one hand raised mid-gesture as she talks.",
+      "bbox": [
+        -380,
+        -640,
+        320,
+        -260
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "Elesa as she appears in Pokemon Black and White, an adult woman with very long straight blonde hair and blunt bangs, blue-grey eyes, a tall model figure and extremely huge breasts. She wears huge black over-ear headphones with yellow accents and thin antenna cables. She wears a yellow sleeveless cropped top with a black stripe, black shorts, black thigh-high stockings and yellow high heels. She laughs with her head tilted slightly back, both hands clasped in front of her chest.",
+      "bbox": [
+        -380,
+        -190,
+        320,
+        190
+      ]
+    },
+    {
+      "label": "object",
+      "caption": "Hex Maniac as she appears in Pokemon X and Y, an adult woman with extremely long messy black hair with a purple tint, swirling spiral eyes and extremely huge breasts. She wears a black short-sleeved cropped knitted sweater and a separate black short skirt, with bare midriff and bare thighs, and black flat shoes. She giggles with one hand held near her mouth, her shoulders shaking.",
+      "bbox": [
+        -380,
+        260,
+        320,
+        640
+      ]
+    }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}
