@@ -93,8 +93,13 @@ Situation の `mossPrompt` と `animaPrompt` には、次のプレイスホル�
 |---|---|
 | `{{left}}` | `left` スロットのキャラクター |
 | `{{left.outfit}}` | `left` スロットに解決された服装 |
+| `{{left.bodyHair}}` | `left` スロットのキャラクターの体毛（キャラの `bodyHairMoss` / `bodyHairAnima`。無ければ空） |
 
 MOSS 用か Anima 用かは書きません。`mossPrompt` の中では MOSS 用の文章に、`animaPrompt` の中では Anima 用のタグに自動で置き換わります。
+
+`{{left.bodyHair}}` は、キャラに体毛が無いと空文字になり、エラーにはなりません（MOSS は空白、Anima は空タグ・連続カンマを整えます）。
+キャラの `bodyHairMoss` は、服装の moss と同じく**完全な文**で書きます（例：`She has sparse thin brown pubic hair.`）。
+`{{left.bodyHair}}` は単独の文の位置に置くと、体毛があれば文として溶け込み、なければ文ごと消えます。
 
 ## ComfyUI 連携
 

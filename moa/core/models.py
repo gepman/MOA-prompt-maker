@@ -28,6 +28,8 @@ class Character:
     group: str | None = None
     tags: list[str] = field(default_factory=list)
     default_outfit: str | None = None
+    body_hair_moss: str = ""   # 体毛。moss は量＋色を含む完全な文（服装の moss と同じ）。{{slot.bodyHair}} の差し込み先
+    body_hair_anima: str = ""
     negative_moss: str = ""
     negative_anima: str = ""
 
@@ -37,6 +39,8 @@ class Character:
             id=d["id"], name=d["name"], moss=d["moss"], anima=d["anima"],
             group=d.get("group"), tags=list(d.get("tags") or []),
             default_outfit=d.get("defaultOutfit"),
+            body_hair_moss=d.get("bodyHairMoss") or "",
+            body_hair_anima=d.get("bodyHairAnima") or "",
             negative_moss=d.get("negativeMoss") or "",
             negative_anima=d.get("negativeAnima") or "",
         )

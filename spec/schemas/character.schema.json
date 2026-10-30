@@ -13,6 +13,8 @@
     "defaultOutfit": { "type": "string", "pattern": "^[a-z0-9_]+$" },
     "moss":  { "type": "string" },
     "anima": { "type": "string" },
+    "bodyHairMoss":  { "type": "string" },
+    "bodyHairAnima": { "type": "string" },
     "negativeMoss":  { "type": "string" },
     "negativeAnima": { "type": "string" }
   }

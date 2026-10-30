@@ -8,8 +8,8 @@ NONE = "none"
 
 ID_RE = re.compile(r"^[a-z0-9_]+$")
 
-# {{slot}} / {{slot.outfit}} の2種のみ（5章）
-PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-z0-9_]+)(?:\.(outfit))?\s*\}\}")
+# {{slot}} / {{slot.outfit}} / {{slot.bodyHair}} の3種のみ（5章）。接尾辞は大文字小文字を区別する
+PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-z0-9_]+)(?:\.(outfit|bodyHair))?\s*\}\}")
 ANY_BRACES_RE = re.compile(r"\{\{(.*?)\}\}", re.S)
 
 # 全体ベースのネガティブ（6章。アプリ側の定数）

@@ -11,11 +11,14 @@ from .textutil import clean_tags, collapse_ws, join_negative, strip_block
 from .validate import validate_scene, validate_situation
 
 
-def _substitute(text: str, blocks: dict[str, tuple[str, str]]) -> str:
-    """blocks: slot -> (キャラのブロック, 服装のブロック)"""
+def _substitute(text: str, blocks: dict[str, dict[str, str]]) -> str:
+    """blocks: slot -> {"character": ..., "outfit": ..., "bodyHair": ...}。
+
+    接尾辞なしはキャラ、`.outfit` は服装、`.bodyHair` は体毛。無いものは空文字になる
+    （空白・空タグの後始末は、呼び出し側の collapse_ws / clean_tags が行う）。
+    """
     def repl(m):
-        char_block, outfit_block = blocks.get(m.group(1), ("", ""))
-        return outfit_block if m.group(2) else char_block
+        return blocks.get(m.group(1), {}).get(m.group(2) or "character", "")
     return PLACEHOLDER_RE.sub(repl, text)
 
 
@@ -44,16 +47,20 @@ def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
     if has_error(result.issues):
         return result
 
-    moss_blocks: dict[str, tuple[str, str]] = {}
-    anima_blocks: dict[str, tuple[str, str]] = {}
+    moss_blocks: dict[str, dict[str, str]] = {}
+    anima_blocks: dict[str, dict[str, str]] = {}
     outfits = []
     chars = []
     for slot in sit.slots:
         char = repo.character(scene.cast[slot])
         res = resolve_outfit(slot, scene.outfits, sit.outfits, char.default_outfit)
         outfit = repo.outfit(res.outfit_id) if res.outfit_id else None
-        moss_blocks[slot] = (strip_block(char.moss), strip_block(outfit.moss) if outfit else "")
-        anima_blocks[slot] = (strip_block(char.anima), strip_block(outfit.anima) if outfit else "")
+        moss_blocks[slot] = {"character": strip_block(char.moss),
+                             "outfit": strip_block(outfit.moss) if outfit else "",
+                             "bodyHair": strip_block(char.body_hair_moss)}
+        anima_blocks[slot] = {"character": strip_block(char.anima),
+                              "outfit": strip_block(outfit.anima) if outfit else "",
+                              "bodyHair": strip_block(char.body_hair_anima)}
         chars.append(char)
         if outfit:
             outfits.append(outfit)

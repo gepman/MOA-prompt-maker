@@ -24,9 +24,9 @@ def collect_strings(node) -> Iterator[str]:
             yield from collect_strings(v)
 
 
-def scan_placeholders(text: str) -> tuple[list[tuple[str, bool]], list[str]]:
-    """(スロット名, outfitか) の一覧と、書式不正な `{{...}}` の一覧を返す。"""
-    found = [(m.group(1), m.group(2) is not None) for m in PLACEHOLDER_RE.finditer(text)]
+def scan_placeholders(text: str) -> tuple[list[tuple[str, str | None]], list[str]]:
+    """(スロット名, 接尾辞: None / "outfit" / "bodyHair") の一覧と、書式不正な `{{...}}` の一覧を返す。"""
+    found = [(m.group(1), m.group(2)) for m in PLACEHOLDER_RE.finditer(text)]
     malformed = [m.group(0) for m in ANY_BRACES_RE.finditer(text)
                  if not PLACEHOLDER_RE.fullmatch(m.group(0))]
     return found, malformed
