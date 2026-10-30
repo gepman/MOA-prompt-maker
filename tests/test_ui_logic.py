@@ -226,3 +226,40 @@ def test_save_does_not_record_stale_generation(repo, data_dir):
     sc["apply_negative"] = True                       # ネガティブ適用の切り替えも「別の内容」
     gen2 = _generated(repo, {**sc, "apply_negative": False})
     assert "記録していません" in L.save(repo, sc, "stale2", "", gen2)[1]
+
+
+# ---- denoise ----
+def test_opening_scene_exposes_its_saved_denoise(repo, data_dir):
+    edit(data_dir / "situations" / "beach" / "beach_chat__trio.yaml", "applyNegative: false",
+         "applyNegative: false\ndenoise: 0.6")
+    repo.reload()
+    sc = _open_trio(repo)
+    assert sc["denoise"] == 0.6
+    assert L.build_scene(sc).denoise == 0.6
+    assert L.new_sc()["denoise"] is None
+
+
+def test_save_stores_slider_denoise_and_rounds_it(repo, data_dir):
+    from moa.core.repository import load_yaml
+    sc = _open_trio(repo)
+    sc2, _ = L.save(repo, sc, "dn", "", None, denoise=0.30000000000000004)
+    data = load_yaml(data_dir / "situations" / "beach" / "beach_chat__dn.yaml")
+    assert data["denoise"] == 0.3 and sc2["denoise"] == 0.3
+
+    sc3, _ = L.save(repo, sc, "nodn", "", None, denoise=None)   # 連携無効なら書かない
+    assert "denoise" not in load_yaml(data_dir / "situations" / "beach" / "beach_chat__nodn.yaml")
+
+
+def test_generation_is_recorded_only_if_denoise_matches(repo, data_dir):
+    from moa.core.repository import load_yaml
+    sc = _open_trio(repo)
+    gen = {**_generated(repo, sc), "denoise": 0.6}
+
+    _, msg = L.save(repo, sc, "same", "", gen, denoise=0.6)
+    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__same.yaml")["compiled"]
+    assert "🖼" in msg and c["denoise"] == 0.6 and c["seed"] == 4242
+
+    # 生成後にスライダーを動かした → 別の内容なので記録しない
+    _, msg = L.save(repo, sc, "moved", "", gen, denoise=0.5)
+    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__moved.yaml")["compiled"]
+    assert "記録していません" in msg and c["seed"] is None

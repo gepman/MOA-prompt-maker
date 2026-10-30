@@ -95,6 +95,7 @@ class Scene:
     name: str | None = None
     outfits: dict[str, str | None] = field(default_factory=dict)
     apply_negative: bool = False
+    denoise: float | None = None  # Anima i2i の denoise（未設定ならワークフローの値）
 
     @classmethod
     def from_dict(cls, d: dict) -> "Scene":
@@ -102,6 +103,7 @@ class Scene:
             id=d["id"], situation=d["situation"], cast=dict(d["cast"]),
             name=d.get("name"), outfits=dict(d.get("outfits") or {}),
             apply_negative=bool(d.get("applyNegative", False)),
+            denoise=d.get("denoise"),
         )
 
 

@@ -39,6 +39,11 @@
       "type": "boolean",
       "default": false
     },
+    "denoise": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
     "compiled": {
       "type": "object",
       "additionalProperties": false,
@@ -51,6 +56,14 @@
         },
         "negativeApplied": {
           "type": "boolean"
+        },
+        "denoise": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
         },
         "seed": {
           "type": [

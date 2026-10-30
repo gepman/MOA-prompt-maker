@@ -1,7 +1,10 @@
-# MOSS/Anima プロンプトビルダー 仕様書 v1.2
+# MOSS/Anima プロンプトビルダー 仕様書 v1.3
 
 ## 変更履歴
 
+- v1.3（2026-10-30）
+  - Anima i2i の `denoise` を画面のスライダーで変えられるようにした。Scene に `denoise` を保存し、
+    生成時の値を `compiled.denoise` に記録する（13.5章）
 - v1.2（2026-10-30）
   - ComfyUI連携を追加（13章）。生成結果を `compiled.seed` / `compiled.images` に記録する
   - ComfyUIへ送るネガティブは、適用OFFのときワークフロー既定を残す（7章の「空文字を入れる」は送信ペイロードの定義であり、
@@ -127,10 +130,12 @@ cast:                   # 必須。スロット名 → Characterのid
   right: hex_maniac_xy
 outfits:                # 任意。スロットごとの服装上書き（Outfitのid、または文字列 none、または未指定）
 applyNegative: false    # 任意。既定 false（6章）
+denoise: 0.35           # 任意。Anima i2i の denoise（0〜1）。未指定ならワークフローの値（13.5章）
 compiled:               # コンパイル／生成時にアプリが書き込む
   mossPrompt: （最終文字列）
   animaPrompt: （最終文字列）
   negativeApplied: false  # その生成でネガティブを適用したか
+  denoise: null           # 生成時に使った denoise（13.5章）
   seed: null              # 生成時のシード（MOSS段・Anima段で共通。13章）
   images: []              # 生成画像のパス（MOSS段 → Anima段の順。13.4章）
 ```
@@ -317,7 +322,8 @@ v1の画面は **「シーン組み立て画面」1つだけ** とする。実�
   `comfyui.timeoutSec`、`comfyui.outputDir`（任意）を持つ。起動時の `--comfy-url` は設定より優先する
 - `nodes` に、値を差し込むノードを `{node: "ID", input: 入力名}` で指定する：
   `mossPositive` / `animaPositive`（必須）、`mossNegative` / `animaNegative`（任意）、
-  `seed`（必須。複数可）、`width` / `height`（任意。両方指定か両方省略）
+  `seed`（必須。複数可）、`width` / `height`（任意。両方指定か両方省略）、
+  `denoise`（任意。Anima i2i サンプラーの `denoise`。13.5章）
 - `outputs.moss` / `outputs.anima` に、各段の画像を出力する保存ノードのIDを指定する（必須）
 - 読み込み時に、ノードIDと入力名がワークフローに実在し、値を差し込める入力（他ノードへの接続でない）であることを検証する。
   不正なら連携は無効になり、生成ボタンは押せない
@@ -347,7 +353,18 @@ v1の画面は **「シーン組み立て画面」1つだけ** とする。実�
 - 記録するのは、生成時のプロンプトとネガティブ適用が保存時の内容と一致する場合だけ。
   生成後にキャストなどを変えた場合は、画像と内容が食い違うため記録しない（その旨を表示する）
 - 保存時に生成結果がなく、`compiled` に保存済みのプロンプトが今回の内容と異なる場合は、
-  食い違った画像を残さないよう `seed` を null、`images` を空にする。内容が同じなら既存の値を残す
+  食い違った画像を残さないよう `seed` を null、`images` を空にする（`compiled.denoise` も null にする）。
+  内容が同じなら既存の値を残す
+
+### 13.5 denoise
+
+- `nodes.denoise` が指定されているとき、生成ボタンの近くに 0.0〜1.0（0.05刻み）のスライダーを置く。
+  初期値はワークフローに書かれている値。送信時にそのノードの `denoise` を書き換える（他のサンプラーには触れない）
+- Scene を保存すると、スライダーの値を Scene の `denoise` に書く。Scene を開くと、その値がスライダーに入る
+  （`denoise` がない Scene は、ワークフローの値）。Situation を選び直しただけでは、操作中の値を保つ
+- 生成時に送った値を `compiled.denoise` に記録する。`nodes.denoise` がない場合は書き換えず、記録も null
+- 13.4章の記録条件に加え、生成後にスライダーを動かした場合も、画像と内容が食い違うため記録しない。
+  保存時に Scene の `denoise` が `compiled.denoise` と異なる場合も、画像をリセットする
 
 ## 付属物
 

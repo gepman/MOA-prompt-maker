@@ -48,6 +48,7 @@ class GenerationRecord:
     """compiled.seed / compiled.images に書く生成結果。images は MOSS段 → Anima段の順。"""
     seed: int | None
     images: list[str]
+    denoise: float | None = None  # 生成時に使った denoise
 
 
 def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = None,
@@ -93,6 +94,8 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         del doc["outfits"]
 
     doc["applyNegative"] = scene.apply_negative
+    if scene.denoise is not None:
+        doc["denoise"] = scene.denoise
 
     compiled = doc.get("compiled")
     if not isinstance(compiled, CommentedMap):
@@ -101,15 +104,22 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         compiled["images"] = []
         doc["compiled"] = compiled
     old_moss, old_anima = compiled.get("mossPrompt"), compiled.get("animaPrompt")
+    old_denoise = compiled.get("denoise")
     if generation is not None:
         compiled["seed"] = generation.seed
         compiled["images"] = list(generation.images)
+        if generation.denoise is not None or "denoise" in compiled:
+            compiled["denoise"] = generation.denoise
     elif old_moss is not None and old_anima is not None and (
             str(old_moss).strip() != result.moss_prompt.strip()
             or str(old_anima).strip() != result.anima_prompt.strip()
-            or bool(compiled.get("negativeApplied", False)) != result.apply_negative):
+            or bool(compiled.get("negativeApplied", False)) != result.apply_negative
+            or (old_denoise is not None and scene.denoise is not None
+                and abs(old_denoise - scene.denoise) > 1e-9)):
         compiled["seed"] = None
         compiled["images"] = []
+        if "denoise" in compiled:
+            compiled["denoise"] = None
     compiled["mossPrompt"] = _text(result.moss_prompt)
     compiled["animaPrompt"] = _text(result.anima_prompt)
     compiled["negativeApplied"] = result.apply_negative

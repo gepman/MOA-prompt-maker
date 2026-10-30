@@ -52,6 +52,8 @@ python -m venv .venv
 4. 下の欄に、MOSS JSON・Anima プロンプト・ネガティブが表示されます（コピーボタン付き）。
    ネガティブの適用は既定で OFF で、OFF でも合成結果は参考表示されます。
 5. 「🎨 生成」で ComfyUI に送信します。完了すると、MOSS 段と Anima 段の画像が表示されます。
+   生成ボタンの上のスライダーで、**Anima i2i の denoise**（MOSS 画像をどれだけ描き直すか。0.0〜1.0）を変えられます。
+   初期値はワークフローの値で、Scene を保存するとその値も保存され、次に開いたときに使われます。
 6. 一番下の **保存** で Scene を保存します。
 
 ### Scene の保存ルール
@@ -62,7 +64,8 @@ python -m venv .venv
 - **既存と同じ Scene 名を入力**：そのときだけ**上書き**します。
 - 保存先は、Situation と同じフォルダの `<situation id>__<Scene名>.yaml` です。
 - 生成した画像のパスとシードは、**保存したときに** `compiled.images` と `compiled.seed` に記録されます。
-  生成後にキャストなどを変えた場合は、内容が食い違うため記録されません。
+  生成後にキャストやスライダーを変えた場合は、内容が食い違うため記録されません。
+  生成時の denoise は `compiled.denoise` に記録されます。
 
 ## データの置き方
 
@@ -106,6 +109,7 @@ nodes:                 # 値を差し込むノード（node は API 形式 JSON 
   mossPositive: {node: "4", input: text}
   animaPositive: {node: "13", input: text}
   seed: [{node: "7", input: seed}, {node: "16", input: seed}]
+  denoise: {node: "16", input: denoise}   # 任意。指定するとスライダーが有効になる
   ...
 outputs:               # 画像を取得する保存ノード
   moss: ["9"]

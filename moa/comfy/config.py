@@ -36,7 +36,15 @@ class ComfyConfig:
     anima_negative: Binding | None = None
     width: Binding | None = None
     height: Binding | None = None
+    denoise: Binding | None = None  # Anima i2i サンプラーの denoise（画面のスライダーで変える）
     base_dir: Path = field(default_factory=Path)
+
+    @property
+    def default_denoise(self) -> float | None:
+        """ワークフローに書かれている denoise。スライダーの初期値になる。"""
+        if self.denoise is None:
+            return None
+        return float(self.workflow[self.denoise.node]["inputs"][self.denoise.input])
 
 
 def _binding(raw, label: str, issues: list[Issue], path: Path) -> Binding | None:
@@ -96,7 +104,7 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
         if key not in nodes:
             issues.append(Issue("error", f"nodes.{key} が指定されていません", path))
         bindings[key] = _binding(nodes.get(key), key, issues, path) if key in nodes else None
-    for key in ("mossNegative", "animaNegative", "width", "height"):
+    for key in ("mossNegative", "animaNegative", "width", "height", "denoise"):
         bindings[key] = _binding(nodes[key], key, issues, path) if nodes.get(key) else None
     if bool(bindings["width"]) != bool(bindings["height"]):
         issues.append(Issue("error", "nodes.width と nodes.height は両方指定するか、両方省略してください", path))
@@ -131,6 +139,11 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
             _check_binding(wf, b, key, issues, path)
     for i, b in enumerate(seeds):
         _check_binding(wf, b, f"seed[{i}]", issues, path)
+    d = bindings["denoise"]
+    if d and not has_error(issues):
+        value = wf[d.node]["inputs"][d.input]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            issues.append(Issue("error", f"nodes.denoise: ノード '{d.node}' の入力 '{d.input}' の値 {value!r} は 0〜1 の数値ではありません", path))
 
     if has_error(issues):
         return None, issues
@@ -144,6 +157,6 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
         moss_positive=bindings["mossPositive"], anima_positive=bindings["animaPositive"],
         moss_negative=bindings["mossNegative"], anima_negative=bindings["animaNegative"],
         seeds=seeds, width=bindings["width"], height=bindings["height"],
-        outputs=outputs, base_dir=base,
+        denoise=bindings["denoise"], outputs=outputs, base_dir=base,
     )
     return cfg, issues

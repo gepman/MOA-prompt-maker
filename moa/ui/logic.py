@@ -24,7 +24,8 @@ INHERIT = "__inherit__"
 
 def new_sc() -> dict:
     return {"situation_id": None, "scene_id": None, "scene_name": "",
-            "cast": {}, "outfits": {}, "apply_negative": False}
+            "cast": {}, "outfits": {}, "apply_negative": False,
+            "denoise": None}  # 開いたSceneに保存されていた denoise（スライダーの値そのものではない）
 
 
 def new_nav() -> dict:
@@ -39,7 +40,7 @@ def build_scene(sc: dict) -> Scene | None:
     sid = sc["scene_id"] or f"{sc['situation_id']}__draft"
     return Scene(id=sid, situation=sc["situation_id"], cast=dict(sc["cast"]),
                  name=sc["scene_name"] or None, outfits=dict(sc["outfits"]),
-                 apply_negative=sc["apply_negative"])
+                 apply_negative=sc["apply_negative"], denoise=sc["denoise"])
 
 
 def slots_of(repo: Repository, sc: dict) -> list[str]:
@@ -115,7 +116,7 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
             s: Scene = entry.obj
             sc = {"situation_id": s.situation, "scene_id": s.id, "scene_name": s.name or "",
                   "cast": dict(s.cast), "outfits": dict(s.outfits),
-                  "apply_negative": s.apply_negative}
+                  "apply_negative": s.apply_negative, "denoise": s.denoise}
         else:
             return sc, nav, f"⚠ ここでは Situation か Scene を選んでください（{entry.kind}）"
         slots = slots_of(repo, sc)
@@ -260,21 +261,35 @@ def next_scene_slug(repo: Repository, sc: dict) -> str:
     return f"{base}_{n}"
 
 
-def generation_matches(generated: dict | None, result) -> bool:
-    """生成結果が、今のコンパイル結果から作られたものか。"""
+def round_denoise(value) -> float | None:
+    """スライダーの値を、YAMLに書いても崩れない桁数にする。"""
+    return None if value is None else round(float(value), 4)
+
+
+def _same_denoise(a: float | None, b: float | None) -> bool:
+    return a is None and b is None or (a is not None and b is not None and abs(a - b) < 1e-9)
+
+
+def generation_matches(generated: dict | None, result, denoise: float | None = None) -> bool:
+    """生成結果が、今のコンパイル結果と denoise から作られたものか。"""
     return bool(generated) and (
         generated["moss_prompt"] == result.moss_prompt
         and generated["anima_prompt"] == result.anima_prompt
-        and generated["negative_applied"] == result.apply_negative)
+        and generated["negative_applied"] == result.apply_negative
+        and _same_denoise(generated.get("denoise"), denoise))
 
 
 def save(repo: Repository, sc: dict, slug: str, display_name: str,
-         generated: dict | None = None) -> tuple[dict, str]:
+         generated: dict | None = None, denoise: float | None = None) -> tuple[dict, str]:
     """Scene名が空なら `<名前>_N` で新規保存。既存Sceneの上書きは、同じScene名を明示したときだけ。
 
-    generated（生成結果）は、今の内容と一致するときだけ seed / images として記録する。
+    generated（生成結果）は、今の内容と denoise が一致するときだけ seed / images として記録する。
+    denoise（スライダーの値）は Scene に保存する。None（ComfyUI連携が無効）なら既存の値に触れない。
     """
     sc = copy.deepcopy(sc)
+    denoise = round_denoise(denoise)
+    if denoise is not None:
+        sc["denoise"] = denoise
     if not sc["situation_id"]:
         return sc, "⚠ Situation が未選択です"
     if display_name.strip():
@@ -290,8 +305,8 @@ def save(repo: Repository, sc: dict, slug: str, display_name: str,
         if has_error(result.issues):
             return sc, "❌ 検証エラーがあるため保存できません"
         record = None
-        if generation_matches(generated, result):
-            record = GenerationRecord(generated["seed"], list(generated["images"]))
+        if generation_matches(generated, result, denoise):
+            record = GenerationRecord(generated["seed"], list(generated["images"]), generated.get("denoise"))
         path = save_scene(repo, scene, result, generation=record)
     except ValueError as e:
         return sc, f"⚠ {e}"

@@ -9,11 +9,13 @@ from moa.core.models import CompileResult
 from .config import ComfyConfig, STAGES
 
 
-def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int) -> dict:
+def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
+          denoise: float | None = None) -> dict:
     """プロンプト・シード・サイズを差し込んだワークフローを返す（元は変更しない）。
 
     ネガティブは「適用ON」のときだけ合成済みで置き換える。OFFのときはワークフローに
     書かれている既定をそのまま使う（ノードに触らない）。
+    denoise は、設定で nodes.denoise が指定されていて値が渡されたときだけ書き換える。
     """
     wf = copy.deepcopy(workflow)
 
@@ -29,6 +31,8 @@ def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int) ->
             put(cfg.anima_negative, result.negative_anima)
     for b in cfg.seeds:
         put(b, seed)
+    if cfg.denoise and denoise is not None:
+        put(cfg.denoise, denoise)
     if cfg.width and cfg.height and result.canvas:
         put(cfg.width, result.canvas["w"])
         put(cfg.height, result.canvas["h"])
@@ -122,6 +126,8 @@ def suggest(wf: dict) -> dict:
             notes.append(f"{stage}段のサンプラーが複数あります（{sid} は割り当てていません）")
             continue
         stage_of[sid] = stage
+        if stage == "anima" and isinstance(inputs.get("denoise"), (int, float)):
+            nodes["denoise"] = _entry(wf, sid, "denoise")  # i2i 段のみ（t2i 段の denoise は 1 固定）
         if pos:
             nodes[f"{stage}Positive"] = _entry(wf, pos, "text")
         if neg:

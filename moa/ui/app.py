@@ -28,6 +28,9 @@ def build_ui(repo: Repository,
         else:
             comfy["cfg"], comfy["issues"] = comfy_loader()
 
+    reload_comfy()  # スライダーの初期値（ワークフローの denoise）を決めるため、組み立ての前に読む
+    default_denoise = comfy["cfg"].default_denoise if comfy["cfg"] and comfy["cfg"].denoise else None
+
     with gr.Blocks(title="MOSS/Anima プロンプトビルダー") as demo:
         sc = gr.State(L.new_sc())
         nav = gr.State(L.new_nav())
@@ -86,6 +89,10 @@ def build_ui(repo: Repository,
                         placeholder="（未指定：ComfyUI の output 内のパスを記録します）")
                     pick_dir_btn = gr.Button("📁 フォルダを選ぶ", scale=1)
                     clear_dir_btn = gr.Button("クリア", scale=1)
+                denoise_sl = gr.Slider(
+                    0.0, 1.0, step=0.05, value=default_denoise if default_denoise is not None else 0.35,
+                    label="Anima i2i の denoise", interactive=default_denoise is not None,
+                    info="MOSS画像をどれだけ描き直すか（0.0＝そのまま、1.0＝ほぼ作り直し）。初期値はワークフローの値。Scene に保存されます")
                 gen_btn = gr.Button("🎨 生成", variant="primary")
                 gen_status = gr.Markdown()
                 gallery = gr.Gallery(label="生成結果（MOSS段 → Anima段）", columns=2, height="auto",
@@ -104,7 +111,7 @@ def build_ui(repo: Repository,
 
         NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg]
         FULL = [sc, nav, lst, crumbs_md, target_md, browse_msg,
-                sel_md, moss_tb, anima_tb, negm_tb, nega_tb, issues_md, neg_cb, name_tb, slug_tb]
+                sel_md, moss_tb, anima_tb, negm_tb, nega_tb, issues_md, neg_cb, name_tb, slug_tb, denoise_sl]
 
         # ---- 出力の組み立て ----
         def data_issues_text() -> str:
@@ -120,9 +127,29 @@ def build_ui(repo: Repository,
         def nav_out(nav_v, msg=None):
             return nav_part(nav_v, msg)
 
-        def full(sc_old, sc_new, nav_v, msg=None, sc_changed=True):
+        def denoise_enabled() -> bool:
+            return bool(comfy["cfg"] and comfy["cfg"].denoise)
+
+        def denoise_update(sc_old, sc_new, mode):
+            """スライダーの更新。mode: "load"＝初期値に戻す / "state"＝有効・無効だけ更新 / None＝Sceneを開いたときだけ値を変える。
+
+            Scene を開いたときは、そのSceneに保存された値（なければワークフローの値）にする。
+            Situation の選び直しでは、操作中の値を保ったままにする。
+            """
+            cfg = comfy["cfg"]
+            enabled = denoise_enabled()
+            default = cfg.default_denoise if enabled else None
+            opened = bool(sc_new["scene_id"]) and sc_new["scene_id"] != sc_old["scene_id"]
+            if mode == "load" or opened:
+                value = default if mode == "load" or sc_new["denoise"] is None else sc_new["denoise"]
+                return gr.update(value=value, interactive=enabled) if value is not None else gr.update(interactive=False)
+            if mode == "state":
+                return gr.update(interactive=enabled)
+            return gr.skip()
+
+        def full(sc_old, sc_new, nav_v, msg=None, sc_changed=True, slider_mode=None):
             if not sc_changed:  # フォルダ移動だけのときは、枠の描き直しとコンパイルを避ける
-                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 9
+                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 10
             r = L.compile_view(repo, sc_new)
             apply = sc_new["apply_negative"]
             note = "" if apply else "（未適用・参考表示）"
@@ -140,6 +167,7 @@ def build_ui(repo: Repository,
                 issues, apply,
                 gr.update(value=sc_new["scene_name"]) if switched else gr.skip(),
                 gr.update(value="") if switched else gr.skip(),
+                denoise_update(sc_old, sc_new, slider_mode),
             ]
 
         # ---- イベント ----
@@ -172,14 +200,15 @@ def build_ui(repo: Repository,
         def on_reload(sc_v, nav_v):
             repo.reload()
             reload_comfy()
-            return full(sc_v, sc_v, nav_v, "🔄 再読み込みしました") + [data_issues_text()] + comfy_parts()
+            return full(sc_v, sc_v, nav_v, "🔄 再読み込みしました", slider_mode="state") + [data_issues_text()] + comfy_parts()
 
         def on_load(sc_v, nav_v):
             reload_comfy()
-            return full(sc_v, sc_v, nav_v, "") + [data_issues_text()] + comfy_parts()
+            return full(sc_v, sc_v, nav_v, "", slider_mode="load") + [data_issues_text()] + comfy_parts()
 
-        def on_save(sc_v, nav_v, slug, display_name, gen_v):
-            sc2, msg = L.save(repo, sc_v, slug, display_name, gen_v)
+        def on_save(sc_v, nav_v, slug, display_name, gen_v, denoise):
+            sc2, msg = L.save(repo, sc_v, slug, display_name, gen_v,
+                              denoise=denoise if denoise_enabled() else None)
             return full(sc_v, sc2, nav_v) + [msg, data_issues_text()]
 
         def on_pick_dir(current):
@@ -189,7 +218,7 @@ def build_ui(repo: Repository,
                 return gr.skip(), f"⚠ {e}"
             return (path, gr.skip()) if path else (gr.skip(), gr.skip())
 
-        def on_generate(sc_v, copy_dir):
+        def on_generate(sc_v, copy_dir, denoise):
             """生成を実行し、経過を逐次表示する。YAMLへの記録は保存ボタンで行う。"""
             skip = gr.skip()
             cfg = comfy["cfg"]
@@ -205,7 +234,8 @@ def build_ui(repo: Repository,
                 return
             done = None
             try:
-                for ev in iter_run(cfg, result, Path(copy_dir) if copy_dir else None):
+                for ev in iter_run(cfg, result, Path(copy_dir) if copy_dir else None,
+                                   denoise=L.round_denoise(denoise)):
                     if isinstance(ev, Generation):
                         done = ev
                     else:
@@ -221,8 +251,9 @@ def build_ui(repo: Repository,
             paths = "\n".join(f"- {STAGE_LABEL[i.stage]}：`{i.record_path}`" for i in done.images)
             state = {"seed": done.seed, "images": [i.record_path for i in done.images],
                      "moss_prompt": done.moss_prompt, "anima_prompt": done.anima_prompt,
-                     "negative_applied": done.negative_applied}
-            yield (f"✅ 完了　シード `{done.seed}`（MOSS段・Anima段で共通）\n\n{paths}\n\n"
+                     "negative_applied": done.negative_applied, "denoise": done.denoise}
+            used = f"、denoise `{done.denoise}`" if done.denoise is not None else ""
+            yield (f"✅ 完了　シード `{done.seed}`（MOSS段・Anima段で共通）{used}\n\n{paths}\n\n"
                    "※ 保存ボタンを押すと、シードと画像のパスが Scene に記録されます"), shots, state
 
         reselect_btn.click(partial(on_pick, "situation", None), [nav], NAV_OUT, api_name="reselect")
@@ -231,10 +262,11 @@ def build_ui(repo: Repository,
         neg_cb.input(on_negative, [neg_cb, sc, nav], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav], FULL + COMFY_OUT, api_name="reload")
-        save_btn.click(on_save, [sc, nav, slug_tb, name_tb, gen], FULL + [save_msg, data_issues_md], api_name="save")
+        save_btn.click(on_save, [sc, nav, slug_tb, name_tb, gen, denoise_sl], FULL + [save_msg, data_issues_md],
+                       api_name="save")
         demo.load(on_load, [sc, nav], FULL + COMFY_OUT, api_name="init")
         pick_dir_btn.click(on_pick_dir, [copy_dir_tb], [copy_dir_tb, gen_status], api_name="pick_dir")
         clear_dir_btn.click(lambda: "", None, [copy_dir_tb], api_name="clear_dir")
-        gen_btn.click(on_generate, [sc, copy_dir_tb], [gen_status, gallery, gen], api_name="generate")
+        gen_btn.click(on_generate, [sc, copy_dir_tb, denoise_sl], [gen_status, gallery, gen], api_name="generate")
 
     return demo

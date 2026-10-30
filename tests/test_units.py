@@ -215,3 +215,39 @@ def test_save_resets_seed_and_images_when_content_changes(repo, trio):
     flipped = replace(changed, apply_negative=True)
     save_scene(repo, flipped, compile_scene(repo, flipped))
     assert _compiled(path)["seed"] is None and _compiled(path)["images"] == []
+
+
+# ---- denoise ----
+def test_scene_denoise_roundtrip_and_schema(repo, data_dir):
+    from moa.core.repository import load_yaml
+    sc = replace(repo.scene("beach_chat__trio"), denoise=0.6)
+    path = save_scene(repo, sc, compile_scene(repo, sc))
+    assert load_yaml(path)["denoise"] == 0.6
+    assert Repository(data_dir).scene("beach_chat__trio").denoise == 0.6
+
+    # None のときは既存の値に触れない
+    sc2 = replace(sc, denoise=None)
+    save_scene(repo, sc2, compile_scene(repo, sc2))
+    assert load_yaml(path)["denoise"] == 0.6
+
+    edit(path, "denoise: 0.6", "denoise: 1.5")        # 範囲外はスキーマ違反
+    assert any("denoise" in i.message for i in errors(Repository(data_dir).issues))
+
+
+def test_compiled_denoise_is_recorded_and_reset(repo):
+    from moa.core.scene_io import GenerationRecord
+    path = repo.path_of("scene", "beach_chat__trio")
+    sc = replace(repo.scene("beach_chat__trio"), denoise=0.35)
+    save_scene(repo, sc, compile_scene(repo, sc), generation=GenerationRecord(9, ["a.png"], 0.35))
+    c = _compiled(path)
+    assert c["denoise"] == 0.35 and c["seed"] == 9
+
+    # 同じ denoise なら生成なしで保存し直しても残る
+    save_scene(repo, sc, compile_scene(repo, sc))
+    assert _compiled(path)["images"] == ["a.png"]
+
+    # denoise を変えて保存すると、画像と食い違うのでリセットされる
+    changed = replace(sc, denoise=0.6)
+    save_scene(repo, changed, compile_scene(repo, changed))
+    c = _compiled(path)
+    assert c["seed"] is None and c["images"] == [] and c["denoise"] is None

@@ -289,3 +289,58 @@ def test_generate_refuses_when_scene_has_errors(cfg, repo, trio):
     bad = compile_scene(repo, replace(trio, cast={"left": "skyla_bw"}))
     with pytest.raises(ComfyError, match="検証エラー"):
         list(iter_run(cfg, bad))
+
+
+# ---- denoise ----
+def test_suggest_finds_denoise_only_on_the_i2i_sampler():
+    n = suggest(json.loads(FIXTURE.read_text(encoding="utf-8")))["nodes"]
+    assert n["denoise"]["node"] == "16" and n["denoise"]["input"] == "denoise"  # 7（t2i, denoise=1）は対象外
+
+
+def test_config_denoise_default_comes_from_workflow(cfg):
+    assert cfg.denoise.node == "16" and cfg.default_denoise == 0.35
+
+
+def test_config_denoise_is_optional(cfg_path):
+    edit(cfg_path, 'denoise: {node: "16", input: denoise}', '# denoise: {node: "16", input: denoise}')
+    c, issues = load_config(cfg_path)
+    assert c is not None and c.denoise is None and c.default_denoise is None
+
+
+@pytest.mark.parametrize("new,expect", [
+    ('denoise: {node: "99", input: denoise}', "ノード '99'"),
+    ('denoise: {node: "16", input: sampler_name}', "0〜1 の数値ではありません"),   # 値が "euler"
+    ('denoise: {node: "16", input: model}', "接続されており"),
+])
+def test_config_denoise_validation(cfg_path, new, expect):
+    edit(cfg_path, 'denoise: {node: "16", input: denoise}', new)
+    c, issues = load_config(cfg_path)
+    assert c is None and any(expect in i.message for i in issues if i.level == "error"), issues
+
+
+def test_apply_denoise_rewrites_only_the_bound_node(cfg, result):
+    wf = apply(cfg.workflow, cfg, result, 1, denoise=0.6)
+    assert wf["16"]["inputs"]["denoise"] == 0.6
+    assert wf["7"]["inputs"]["denoise"] == 1  # MOSS段のサンプラーには触らない
+    assert apply(cfg.workflow, cfg, result, 1)["16"]["inputs"]["denoise"] == 0.35  # 未指定ならワークフローの値
+    assert cfg.workflow["16"]["inputs"]["denoise"] == 0.35  # 元は変更されない
+
+
+def test_apply_ignores_denoise_without_binding(cfg, result):
+    cfg.denoise = None
+    assert apply(cfg.workflow, cfg, result, 1, denoise=0.9)["16"]["inputs"]["denoise"] == 0.35
+
+
+def test_generate_sends_and_reports_denoise(fake, cfg, result):
+    server = fake()
+    gen = run(cfg, result, client=client_for(server, cfg), seed=1, denoise=0.6)
+    assert server.submitted[0]["16"]["inputs"]["denoise"] == 0.6
+    assert gen.denoise == 0.6 and gen.record().denoise == 0.6
+
+
+def test_generate_without_binding_leaves_workflow_denoise_and_records_none(fake, cfg, result):
+    cfg.denoise = None
+    server = fake()
+    gen = run(cfg, result, client=client_for(server, cfg), seed=1, denoise=0.9)
+    assert server.submitted[0]["16"]["inputs"]["denoise"] == 0.35
+    assert gen.denoise is None

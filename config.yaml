@@ -16,6 +16,7 @@ nodes:
   seed:                                       # 生成ごとにランダムな値を決め、全部に同じ値を入れる
     - {node: "7",  input: seed}               # MOSS サンプラー
     - {node: "16", input: seed}               # Anima i2i サンプラー
+  denoise: {node: "16", input: denoise}       # Anima i2i の変化量。画面のスライダーで変える（初期値はワークフローの値）
   width:  {node: "6", input: width}           # サイズ(16の倍数)。Situation の canvas.w を入れる
   height: {node: "6", input: height}          # 同 canvas.h
 
