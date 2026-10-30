@@ -194,3 +194,35 @@ animaPrompt: |
     assert sc2["outfits"] == {"left": "none"}
     assert (nav2["target"], nav2["slot"]) == ("char", "extra")             # 未選択スロットへ進む
     assert not L.compile_view(repo, sc2).ok                                # extra が未割当
+
+
+# ---- 生成結果の記録は、今の内容と一致するときだけ ----
+def _generated(repo, sc, seed=4242):
+    r = L.compile_view(repo, sc)
+    return {"seed": seed, "images": ["output/m.png", "output/a.png"], "moss_prompt": r.moss_prompt,
+            "anima_prompt": r.anima_prompt, "negative_applied": r.apply_negative}
+
+
+def test_save_records_generation_when_it_matches(repo, data_dir):
+    sc = _open_trio(repo)
+    gen = _generated(repo, sc)
+    sc2, msg = L.save(repo, sc, "gen", "", gen)
+    assert "🖼" in msg and "4242" in msg
+    from moa.core.repository import load_yaml
+    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__gen.yaml")["compiled"]
+    assert c["seed"] == 4242 and c["images"] == ["output/m.png", "output/a.png"]
+
+
+def test_save_does_not_record_stale_generation(repo, data_dir):
+    sc = _open_trio(repo)
+    gen = _generated(repo, sc)
+    sc["cast"]["center"] = "skyla_bw"                 # 生成後にキャストを変えた
+    _, msg = L.save(repo, sc, "stale", "", gen)
+    assert "記録していません" in msg
+    from moa.core.repository import load_yaml
+    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__stale.yaml")["compiled"]
+    assert c["seed"] is None and c["images"] == []
+
+    sc["apply_negative"] = True                       # ネガティブ適用の切り替えも「別の内容」
+    gen2 = _generated(repo, {**sc, "apply_negative": False})
+    assert "記録していません" in L.save(repo, sc, "stale2", "", gen2)[1]

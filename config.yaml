@@ -1,0 +1,25 @@
+# ComfyUI 連携の設定。
+# ノードIDの候補は次のコマンドでワークフローから推定できる:
+#   .venv\Scripts\python -m moa.comfy.suggest workflow/<ワークフロー>.json
+comfyui:
+  url: http://127.0.0.1:8188          # ComfyUI のURL（--comfy-url で一時的に上書き可）
+  workflow: workflow/moss_to_anima_i2i_api_v1.1.json   # API形式で保存したJSON（このファイルからの相対パス）
+  timeoutSec: 600                     # 生成完了を待つ最大秒数
+  outputDir: null                     # ComfyUI の output フォルダ。指定すると記録するパスが絶対パスになる
+
+# 値を差し込むノード。node は API形式JSONのキー、input はそのノードの入力名。
+nodes:
+  mossPositive:  {node: "4",  input: text}    # ① MOSSプロンプト(ポジティブ)
+  mossNegative:  {node: "5",  input: text}    # MOSS ネガティブ（適用ONのときだけ書き換える）
+  animaPositive: {node: "13", input: text}    # ② Animaプロンプト(ポジティブ)
+  animaNegative: {node: "14", input: text}    # Anima ネガティブ（適用ONのときだけ書き換える）
+  seed:                                       # 生成ごとにランダムな値を決め、全部に同じ値を入れる
+    - {node: "7",  input: seed}               # MOSS サンプラー
+    - {node: "16", input: seed}               # Anima i2i サンプラー
+  width:  {node: "6", input: width}           # サイズ(16の倍数)。Situation の canvas.w を入れる
+  height: {node: "6", input: height}          # 同 canvas.h
+
+# 生成画像を取得する保存ノード。compiled.images には MOSS段 → Anima段の順で記録する。
+outputs:
+  moss:  ["9"]     # 保存:MOSS出力
+  anima: ["18"]    # 保存:Anima i2i 結果

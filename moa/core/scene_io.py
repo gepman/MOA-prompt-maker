@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -42,8 +43,21 @@ def _sync_mapping(target: CommentedMap, values: dict) -> None:
         target[k] = v
 
 
-def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = None) -> Path:
-    """Sceneを保存し compiled にスナップショットを書き込む。errorがあれば保存しない。"""
+@dataclass
+class GenerationRecord:
+    """compiled.seed / compiled.images に書く生成結果。images は MOSS段 → Anima段の順。"""
+    seed: int | None
+    images: list[str]
+
+
+def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = None,
+               generation: GenerationRecord | None = None) -> Path:
+    """Sceneを保存し compiled にスナップショットを書き込む。errorがあれば保存しない。
+
+    generation があれば seed と images を書く。なければ既存の値を残すが、保存済みの
+    スナップショットと今回のプロンプト／ネガティブ適用が食い違う場合は、画像と内容が
+    合わなくなるため seed と images をリセットする。
+    """
     if not result.ok:
         raise ValueError("検証エラーがあるため保存できません")
 
@@ -86,6 +100,16 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         compiled["seed"] = None
         compiled["images"] = []
         doc["compiled"] = compiled
+    old_moss, old_anima = compiled.get("mossPrompt"), compiled.get("animaPrompt")
+    if generation is not None:
+        compiled["seed"] = generation.seed
+        compiled["images"] = list(generation.images)
+    elif old_moss is not None and old_anima is not None and (
+            str(old_moss).strip() != result.moss_prompt.strip()
+            or str(old_anima).strip() != result.anima_prompt.strip()
+            or bool(compiled.get("negativeApplied", False)) != result.apply_negative):
+        compiled["seed"] = None
+        compiled["images"] = []
     compiled["mossPrompt"] = _text(result.moss_prompt)
     compiled["animaPrompt"] = _text(result.anima_prompt)
     compiled["negativeApplied"] = result.apply_negative

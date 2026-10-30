@@ -14,6 +14,7 @@ from ruamel.yaml import YAML
 
 from moa.core import Repository, Scene, compile_scene, new_scene_id, resolve_outfit, save_scene
 from moa.core.models import has_error
+from moa.core.scene_io import GenerationRecord
 from moa.core.repository import is_scene_dict
 from moa.core.tree import breadcrumb, list_folder
 
@@ -259,8 +260,20 @@ def next_scene_slug(repo: Repository, sc: dict) -> str:
     return f"{base}_{n}"
 
 
-def save(repo: Repository, sc: dict, slug: str, display_name: str) -> tuple[dict, str]:
-    """Scene名が空なら `<名前>_N` で新規保存。既存Sceneの上書きは、同じScene名を明示したときだけ。"""
+def generation_matches(generated: dict | None, result) -> bool:
+    """生成結果が、今のコンパイル結果から作られたものか。"""
+    return bool(generated) and (
+        generated["moss_prompt"] == result.moss_prompt
+        and generated["anima_prompt"] == result.anima_prompt
+        and generated["negative_applied"] == result.apply_negative)
+
+
+def save(repo: Repository, sc: dict, slug: str, display_name: str,
+         generated: dict | None = None) -> tuple[dict, str]:
+    """Scene名が空なら `<名前>_N` で新規保存。既存Sceneの上書きは、同じScene名を明示したときだけ。
+
+    generated（生成結果）は、今の内容と一致するときだけ seed / images として記録する。
+    """
     sc = copy.deepcopy(sc)
     if not sc["situation_id"]:
         return sc, "⚠ Situation が未選択です"
@@ -276,9 +289,17 @@ def save(repo: Repository, sc: dict, slug: str, display_name: str) -> tuple[dict
         result = compile_scene(repo, scene)
         if has_error(result.issues):
             return sc, "❌ 検証エラーがあるため保存できません"
-        path = save_scene(repo, scene, result)
+        record = None
+        if generation_matches(generated, result):
+            record = GenerationRecord(generated["seed"], list(generated["images"]))
+        path = save_scene(repo, scene, result, generation=record)
     except ValueError as e:
         return sc, f"⚠ {e}"
     repo.reload()
     verb = "上書き保存しました" if overwrite else "新規保存しました"
-    return sc, f"💾 {verb}：`{repo.rel(path)}`"
+    msg = f"💾 {verb}：`{repo.rel(path)}`"
+    if record:
+        msg += f"\n\n🖼 シード {record.seed} と画像 {len(record.images)} 枚のパスを記録しました"
+    elif generated:
+        msg += "\n\nℹ 生成後に内容が変わったため、生成結果（シード・画像）は記録していません"
+    return sc, msg

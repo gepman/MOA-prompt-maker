@@ -1,7 +1,11 @@
-# MOSS/Anima プロンプトビルダー 仕様書 v1.1
+# MOSS/Anima プロンプトビルダー 仕様書 v1.2
 
 ## 変更履歴
 
+- v1.2（2026-10-30）
+  - ComfyUI連携を追加（13章）。生成結果を `compiled.seed` / `compiled.images` に記録する
+  - ComfyUIへ送るネガティブは、適用OFFのときワークフロー既定を残す（7章の「空文字を入れる」は送信ペイロードの定義であり、
+    ComfyUI連携ではノードに触れない。13.3章）
 - v1.1（2026-10-30）
   - ネガティブの「全体ベース」の中身を定義（6章）
   - 服装の moss は完全な文で書く方式に変更し、none／空のときの文章処理を定義（4.2章、5章、7章）
@@ -127,8 +131,8 @@ compiled:               # コンパイル／生成時にアプリが書き込む
   mossPrompt: （最終文字列）
   animaPrompt: （最終文字列）
   negativeApplied: false  # その生成でネガティブを適用したか
-  seed: null
-  images: []              # 生成画像のパス
+  seed: null              # 生成時のシード（MOSS段・Anima段で共通。13章）
+  images: []              # 生成画像のパス（MOSS段 → Anima段の順。13.4章）
 ```
 
 置き場：Situationと同じフォルダに、ファイル名 `<situation id>__<scene名>.yaml` として置く。
@@ -304,6 +308,46 @@ v1の画面は **「シーン組み立て画面」1つだけ** とする。実�
 - ネガティブの層ごとの個別ON/OFF
 - キャストセット（三人組など、複数スロットの割当プリセット）
 - シリーズ（複数Sceneの順序付きグループ）の独立エンティティ化
+
+## 13. ComfyUI連携（v1.2）
+
+### 13.1 設定ファイル `config.yaml`
+
+- `comfyui.url`（既定 `http://127.0.0.1:8188`）、`comfyui.workflow`（API形式のワークフローJSON）、
+  `comfyui.timeoutSec`、`comfyui.outputDir`（任意）を持つ。起動時の `--comfy-url` は設定より優先する
+- `nodes` に、値を差し込むノードを `{node: "ID", input: 入力名}` で指定する：
+  `mossPositive` / `animaPositive`（必須）、`mossNegative` / `animaNegative`（任意）、
+  `seed`（必須。複数可）、`width` / `height`（任意。両方指定か両方省略）
+- `outputs.moss` / `outputs.anima` に、各段の画像を出力する保存ノードのIDを指定する（必須）
+- 読み込み時に、ノードIDと入力名がワークフローに実在し、値を差し込める入力（他ノードへの接続でない）であることを検証する。
+  不正なら連携は無効になり、生成ボタンは押せない
+- `python -m moa.comfy.suggest <workflow.json>` で、ワークフローから割り当ての候補を推定して出力する
+
+### 13.2 送信する内容
+
+- MOSS用プロンプトは `compiled.mossPrompt`（7章の結果そのもの）、Animaは `compiled.animaPrompt` を差し込む
+- シードは**生成ごとにランダムな値を1つ**決め、`nodes.seed` の**すべて**に同じ値を入れる（MOSS段とAnima段で共通）
+- `width` / `height` には Situation の `canvas` を入れる。16の倍数でない場合は警告を表示する
+
+### 13.3 ネガティブ
+
+- 適用ON（`applyNegative: true`）：6章で合成したネガティブで、`mossNegative` / `animaNegative` のノードを置き換える
+- 適用OFF：これらのノードには**触れない**。ワークフローJSONに書かれている既定のネガティブがそのまま使われる
+  （7章の「送信ペイロードには空文字」は、ComfyUI連携では採用しない。空文字にするとワークフロー側の既定まで消えるため）
+
+### 13.4 生成結果の記録
+
+- 生成が完了したら、MOSS段・Anima段の両方の画像を画面に表示する
+- 画像の取得先は ComfyUI の `/view`。`compiled.images` に書くパスは次のとおり：
+  - 既定：ComfyUI側のパス（`comfyui.outputDir` があればその下の絶対パス、なければ `output/<subfolder>/<ファイル名>`）
+  - UIでコピー先フォルダを明示したときは、そのフォルダへ画像を保存し、**コピー先のパス**を記録する
+    （同名ファイルがあれば上書きせず `_1` などを付ける）
+  - 並びは **MOSS段 → Anima段**
+- 生成しただけではYAMLに書かない。**保存ボタンを押したとき**に `compiled.seed` と `compiled.images` へ書く
+- 記録するのは、生成時のプロンプトとネガティブ適用が保存時の内容と一致する場合だけ。
+  生成後にキャストなどを変えた場合は、画像と内容が食い違うため記録しない（その旨を表示する）
+- 保存時に生成結果がなく、`compiled` に保存済みのプロンプトが今回の内容と異なる場合は、
+  食い違った画像を残さないよう `seed` を null、`images` を空にする。内容が同じなら既存の値を残す
 
 ## 付属物
 

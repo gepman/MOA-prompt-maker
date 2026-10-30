@@ -179,3 +179,39 @@ def test_new_scene_id_validation():
     for bad in ("", "Has Space", "日本語"):
         with pytest.raises(ValueError):
             new_scene_id("beach_chat", bad)
+
+
+# ---- 生成結果の記録（compiled.seed / compiled.images）----
+def _compiled(path):
+    from moa.core.repository import load_yaml
+    return load_yaml(path)["compiled"]
+
+
+def test_save_writes_generation_record(repo, trio):
+    from moa.core.scene_io import GenerationRecord
+    path = repo.path_of("scene", trio.id)
+    save_scene(repo, trio, compile_scene(repo, trio),
+               generation=GenerationRecord(777, ["output/moss_1.png", "output/anima_1.png"]))
+    c = _compiled(path)
+    assert c["seed"] == 777 and c["images"] == ["output/moss_1.png", "output/anima_1.png"]
+
+
+def test_save_resets_seed_and_images_when_content_changes(repo, trio):
+    from moa.core.scene_io import GenerationRecord
+    path = repo.path_of("scene", trio.id)
+    save_scene(repo, trio, compile_scene(repo, trio), generation=GenerationRecord(5, ["a.png"]))
+
+    # 内容が同じなら、生成なしで保存し直しても残る
+    save_scene(repo, trio, compile_scene(repo, trio))
+    assert _compiled(path)["seed"] == 5 and _compiled(path)["images"] == ["a.png"]
+
+    # キャストを変えて保存すると、画像と内容が食い違うのでリセットされる
+    changed = replace(trio, cast={**trio.cast, "center": "skyla_bw"})
+    save_scene(repo, changed, compile_scene(repo, changed))
+    assert _compiled(path)["seed"] is None and _compiled(path)["images"] == []
+
+    # ネガティブ適用の切り替えも同様
+    save_scene(repo, changed, compile_scene(repo, changed), generation=GenerationRecord(6, ["b.png"]))
+    flipped = replace(changed, apply_negative=True)
+    save_scene(repo, flipped, compile_scene(repo, flipped))
+    assert _compiled(path)["seed"] is None and _compiled(path)["images"] == []
