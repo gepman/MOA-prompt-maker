@@ -1,7 +1,12 @@
-# MOSS/Anima プロンプトビルダー 仕様書 v1.3
+# MOSS/Anima プロンプトビルダー 仕様書 v1.4
 
 ## 変更履歴
 
+- v1.4（2026-10-30）
+  - 生成パラメータを Scene ごとに設定できるようにした。Scene に任意の `gen` を追加（書いた項目だけワークフローの値を上書き）。
+    生成時に実際に使った全項目を `compiled.gen` に記録する（13.5章）
+  - v1.3 の Scene `denoise` と `compiled.denoise` は `gen.anima.denoise` / `compiled.gen` に統合した
+    （旧キーは読み込み時に `gen.anima.denoise` として扱い、保存時に新しい形へ移す）
 - v1.3（2026-10-30）
   - Anima i2i の `denoise` を画面のスライダーで変えられるようにした。Scene に `denoise` を保存し、
     生成時の値を `compiled.denoise` に記録する（13.5章）
@@ -130,12 +135,14 @@ cast:                   # 必須。スロット名 → Characterのid
   right: hex_maniac_xy
 outfits:                # 任意。スロットごとの服装上書き（Outfitのid、または文字列 none、または未指定）
 applyNegative: false    # 任意。既定 false（6章）
-denoise: 0.35           # 任意。Anima i2i の denoise（0〜1）。未指定ならワークフローの値（13.5章）
+gen:                    # 任意。書いた項目だけワークフローの値を上書きする（13.5章）
+  moss:  { steps: 50, cfg: 3.0 }
+  anima: { steps: 14, cfg: 1.8, denoise: 0.45 }
 compiled:               # コンパイル／生成時にアプリが書き込む
   mossPrompt: （最終文字列）
   animaPrompt: （最終文字列）
   negativeApplied: false  # その生成でネガティブを適用したか
-  denoise: null           # 生成時に使った denoise（13.5章）
+  gen: {}                 # 生成時に実際に使った値。継承分も含む全項目（13.5章）
   seed: null              # 生成時のシード（MOSS段・Anima段で共通。13章）
   images: []              # 生成画像のパス（MOSS段 → Anima段の順。13.4章）
 ```
@@ -323,7 +330,7 @@ v1の画面は **「シーン組み立て画面」1つだけ** とする。実�
 - `nodes` に、値を差し込むノードを `{node: "ID", input: 入力名}` で指定する：
   `mossPositive` / `animaPositive`（必須）、`mossNegative` / `animaNegative`（任意）、
   `seed`（必須。複数可）、`width` / `height`（任意。両方指定か両方省略）、
-  `denoise`（任意。Anima i2i サンプラーの `denoise`。13.5章）
+  `samplers`（任意。段ごとの KSampler ノード。`gen` の対象。13.5章）
 - `outputs.moss` / `outputs.anima` に、各段の画像を出力する保存ノードのIDを指定する（必須）
 - 読み込み時に、ノードIDと入力名がワークフローに実在し、値を差し込める入力（他ノードへの接続でない）であることを検証する。
   不正なら連携は無効になり、生成ボタンは押せない
@@ -353,18 +360,35 @@ v1の画面は **「シーン組み立て画面」1つだけ** とする。実�
 - 記録するのは、生成時のプロンプトとネガティブ適用が保存時の内容と一致する場合だけ。
   生成後にキャストなどを変えた場合は、画像と内容が食い違うため記録しない（その旨を表示する）
 - 保存時に生成結果がなく、`compiled` に保存済みのプロンプトが今回の内容と異なる場合は、
-  食い違った画像を残さないよう `seed` を null、`images` を空にする（`compiled.denoise` も null にする）。
+  食い違った画像を残さないよう `seed` を null、`images` を空にし、`compiled.gen` を削除する。
   内容が同じなら既存の値を残す
 
-### 13.5 denoise
+### 13.5 生成パラメータ（`gen`）
 
-- `nodes.denoise` が指定されているとき、生成ボタンの近くに 0.0〜1.0（0.05刻み）のスライダーを置く。
-  初期値はワークフローに書かれている値。送信時にそのノードの `denoise` を書き換える（他のサンプラーには触れない）
-- Scene を保存すると、スライダーの値を Scene の `denoise` に書く。Scene を開くと、その値がスライダーに入る
-  （`denoise` がない Scene は、ワークフローの値）。Situation を選び直しただけでは、操作中の値を保つ
-- 生成時に送った値を `compiled.denoise` に記録する。`nodes.denoise` がない場合は書き換えず、記録も null
-- 13.4章の記録条件に加え、生成後にスライダーを動かした場合も、画像と内容が食い違うため記録しない。
-  保存時に Scene の `denoise` が `compiled.denoise` と異なる場合も、画像をリセットする
+Scene ごとに、サンプラーの生成パラメータを上書きできる。
+
+```yaml
+gen:
+  moss:  { steps: 50, cfg: 3.0 }
+  anima: { steps: 14, cfg: 1.8, denoise: 0.45 }
+```
+
+- **対象**：MOSS段は `steps` / `cfg`、Anima段は `steps` / `cfg` / `denoise`。MOSS段は t2i なので `denoise` を持たず、
+  `gen.moss.denoise` は**エラー**とする。対象のサンプラーは `config.yaml` の `nodes.samplers`（`moss` / `anima`）で指定する
+  （入力名は `steps` / `cfg` / `denoise` 固定。ワークフロー上でそれぞれ数値であること）
+- **値の範囲**（スキーマ `scene.schema.json`）：`steps` は1以上の整数、`cfg` は0より大、`denoise` は0〜1
+- **解決順**：Scene.gen → ワークフローJSONの値。`gen` は任意で、**書いた項目だけ**を上書きする（書かなかった項目はワークフローの値）
+- **記録**：生成時に**実際に使った値**を、継承分も含む全項目で `compiled.gen` に記録する。
+  `compiled.gen` は生成時の記録なので、`Scene.gen` を変えて保存しても書き換えない（プロンプトが変わって画像をリセットするときは削除する）。
+  生成後にスライダーを動かして保存した場合も、画像は `compiled.gen`（使った値）と対応し、`Scene.gen` には今の設定が入る
+- **UI**：項目ごとにスライダーと「出どころ」（Scene / ワークフロー）を表示する。
+  - スライダーを動かした項目だけが Scene.gen になる。初期値と動かしていない項目の値はワークフローの値
+  - 項目ごとに「ワークフローの値に戻す」ボタンがあり、押すとその項目を Scene.gen から削除する
+  - 保存すると Scene.gen を書く。Scene を開くと、その Scene.gen がスライダーに入る（開き直すと、未保存の操作は破棄される）。
+    Situation を選び直しただけでは、操作中の値を保つ
+  - `nodes.samplers` が未設定の段は、スライダーを操作できない
+- **互換**：v1.3 の Scene `denoise` は `gen.anima.denoise` として読み込む（`gen.anima.denoise` があればそちらが優先）。
+  旧 `compiled.denoise` は読み込めるが保存時に削除する。旧 `nodes.denoise`（config.yaml）は警告を出し、`nodes.samplers.anima` を使う
 
 ## 付属物
 

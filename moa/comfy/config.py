@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
+from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue, has_error
 
 DEFAULT_URL = "http://127.0.0.1:8188"
@@ -36,15 +37,15 @@ class ComfyConfig:
     anima_negative: Binding | None = None
     width: Binding | None = None
     height: Binding | None = None
-    denoise: Binding | None = None  # Anima i2i サンプラーの denoise（画面のスライダーで変える）
+    samplers: dict[str, str] = field(default_factory=dict)  # 段 -> サンプラーのノードid（Scene.gen の対象）
     base_dir: Path = field(default_factory=Path)
 
-    @property
-    def default_denoise(self) -> float | None:
-        """ワークフローに書かれている denoise。スライダーの初期値になる。"""
-        if self.denoise is None:
-            return None
-        return float(self.workflow[self.denoise.node]["inputs"][self.denoise.input])
+    def has_sampler(self, stage: str) -> bool:
+        return stage in self.samplers
+
+    def workflow_value(self, stage: str, param: str):
+        """ワークフローに書かれている値（Scene.gen で上書きされないときに使われる値）。"""
+        return self.workflow[self.samplers[stage]]["inputs"][param]
 
 
 def _binding(raw, label: str, issues: list[Issue], path: Path) -> Binding | None:
@@ -104,7 +105,7 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
         if key not in nodes:
             issues.append(Issue("error", f"nodes.{key} が指定されていません", path))
         bindings[key] = _binding(nodes.get(key), key, issues, path) if key in nodes else None
-    for key in ("mossNegative", "animaNegative", "width", "height", "denoise"):
+    for key in ("mossNegative", "animaNegative", "width", "height"):
         bindings[key] = _binding(nodes[key], key, issues, path) if nodes.get(key) else None
     if bool(bindings["width"]) != bool(bindings["height"]):
         issues.append(Issue("error", "nodes.width と nodes.height は両方指定するか、両方省略してください", path))
@@ -139,11 +140,36 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
             _check_binding(wf, b, key, issues, path)
     for i, b in enumerate(seeds):
         _check_binding(wf, b, f"seed[{i}]", issues, path)
-    d = bindings["denoise"]
-    if d and not has_error(issues):
-        value = wf[d.node]["inputs"][d.input]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
-            issues.append(Issue("error", f"nodes.denoise: ノード '{d.node}' の入力 '{d.input}' の値 {value!r} は 0〜1 の数値ではありません", path))
+
+    # Scene.gen で上書きするサンプラー（steps / cfg は両段、denoise は anima のみ）
+    if "denoise" in nodes:
+        issues.append(Issue("warning", "nodes.denoise は廃止されました。nodes.samplers.anima を使ってください（denoise もそこから上書きできます）", path))
+    samplers: dict[str, str] = {}
+    raw_samplers = nodes.get("samplers") or {}
+    if not isinstance(raw_samplers, dict):
+        issues.append(Issue("error", 'nodes.samplers は {moss: {node: "7"}, anima: {node: "16"}} の形で指定してください', path))
+        raw_samplers = {}
+    for stage, raw in raw_samplers.items():
+        if stage not in GEN_PARAMS:
+            issues.append(Issue("error", f"nodes.samplers.{stage}: moss / anima のいずれかを指定してください", path))
+            continue
+        nid = raw.get("node") if isinstance(raw, dict) else raw
+        if nid is None:
+            issues.append(Issue("error", f"nodes.samplers.{stage} にノードid（node）がありません", path))
+            continue
+        nid = str(nid)
+        node = wf.get(nid)
+        if node is None:
+            issues.append(Issue("error", f"nodes.samplers.{stage}: ノード '{nid}' がワークフローにありません", path))
+            continue
+        samplers[stage] = nid
+        for param in GEN_PARAMS[stage]:
+            value = node.get("inputs", {}).get(param)
+            ok = (not isinstance(value, bool) and isinstance(value, (int, float))
+                  and (value >= 1 if param == "steps" else value > 0 if param == "cfg" else 0 <= value <= 1))
+            if not ok:
+                issues.append(Issue("error", f"nodes.samplers.{stage}: ノード '{nid}'（{node['class_type']}）の入力 '{param}' の値 {value!r} が不正です"
+                                    "（steps は1以上、cfg は0より大、denoise は0〜1の数値で、他ノードへの接続ではないこと）", path))
 
     if has_error(issues):
         return None, issues
@@ -157,6 +183,6 @@ def load_config(path: Path | str, url_override: str | None = None) -> tuple[Comf
         moss_positive=bindings["mossPositive"], anima_positive=bindings["animaPositive"],
         moss_negative=bindings["mossNegative"], anima_negative=bindings["animaNegative"],
         seeds=seeds, width=bindings["width"], height=bindings["height"],
-        denoise=bindings["denoise"], outputs=outputs, base_dir=base,
+        samplers=samplers, outputs=outputs, base_dir=base,
     )
     return cfg, issues

@@ -11,7 +11,7 @@ from moa.core.scene_io import GenerationRecord
 
 from .client import ComfyClient, ComfyError
 from .config import STAGE_LABEL, STAGES, ComfyConfig
-from .workflow import apply
+from .workflow import apply, read_gen
 
 
 @dataclass
@@ -29,10 +29,10 @@ class Generation:
     moss_prompt: str
     anima_prompt: str
     negative_applied: bool
-    denoise: float | None = None  # 実際に送った値。denoise を書き換えない設定なら None
+    gen: dict = field(default_factory=dict)  # 実際に使った生成パラメータ（継承分も含む全項目）
 
     def record(self) -> GenerationRecord:
-        return GenerationRecord(self.seed, [i.record_path for i in self.images], self.denoise)
+        return GenerationRecord(self.seed, [i.record_path for i in self.images], self.gen)
 
 
 def new_seed() -> int:
@@ -62,18 +62,19 @@ def _record_path(cfg: ComfyConfig, subfolder: str, filename: str, data: bytes, c
 
 def iter_run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = None,
              client: ComfyClient | None = None, seed: int | None = None,
-             denoise: float | None = None) -> Iterator[str | Generation]:
+             gen: dict | None = None) -> Iterator[str | Generation]:
     """経過メッセージ(str)を逐次 yield し、最後に Generation を yield する。"""
     if not result.ok:
         raise ComfyError("検証エラーがあるため生成できません")
     client = client or ComfyClient(cfg.url, cfg.timeout_sec)
     seed = new_seed() if seed is None else seed
-    denoise = denoise if cfg.denoise else None  # 割り当てがなければ、ワークフローの値のまま
 
     if result.canvas and (result.canvas["w"] % 16 or result.canvas["h"] % 16):
         yield f"⚠ canvas {result.canvas['w']}×{result.canvas['h']} は16の倍数ではありません（モデルによっては失敗します）"
-    yield f"シード {seed}" + (f"、denoise {denoise}" if denoise is not None else "") + " で送信中…"
-    prompt_id = client.submit(apply(cfg.workflow, cfg, result, seed, denoise))
+    yield f"シード {seed} で送信中…"
+    workflow = apply(cfg.workflow, cfg, result, seed, gen)
+    used = read_gen(workflow, cfg)  # 実際に送る値（Scene.gen → ワークフローの値）
+    prompt_id = client.submit(workflow)
     outputs = yield from client.iter_wait(prompt_id)
 
     images: list[ImageRef] = []
@@ -86,16 +87,16 @@ def iter_run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = No
             data = client.fetch_image(im["filename"], im.get("subfolder", ""), im.get("type", "output"))
             path = _record_path(cfg, im.get("subfolder", ""), im["filename"], data, copy_dir)
             images.append(ImageRef(stage, im["filename"], path, data))
-    yield Generation(seed, images, result.moss_prompt, result.anima_prompt, result.apply_negative, denoise)
+    yield Generation(seed, images, result.moss_prompt, result.anima_prompt, result.apply_negative, used)
 
 
 def run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = None,
         client: ComfyClient | None = None, seed: int | None = None, progress=None,
-        denoise: float | None = None) -> Generation:
-    gen = None
-    for ev in iter_run(cfg, result, copy_dir, client, seed, denoise):
+        gen: dict | None = None) -> Generation:
+    done = None
+    for ev in iter_run(cfg, result, copy_dir, client, seed, gen):
         if isinstance(ev, Generation):
-            gen = ev
+            done = ev
         elif progress:
             progress(ev)
-    return gen
+    return done

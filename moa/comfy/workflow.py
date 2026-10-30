@@ -4,18 +4,21 @@ from __future__ import annotations
 import copy
 from collections import deque
 
+from moa.core.gen import GEN_PARAMS, clean_gen
 from moa.core.models import CompileResult
 
 from .config import ComfyConfig, STAGES
 
 
 def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
-          denoise: float | None = None) -> dict:
+          gen: dict | None = None) -> dict:
     """プロンプト・シード・サイズを差し込んだワークフローを返す（元は変更しない）。
 
     ネガティブは「適用ON」のときだけ合成済みで置き換える。OFFのときはワークフローに
     書かれている既定をそのまま使う（ノードに触らない）。
-    denoise は、設定で nodes.denoise が指定されていて値が渡されたときだけ書き換える。
+    gen（Scene.gen）は、書かれた項目だけサンプラーの入力を上書きする。解決順は
+    Scene.gen → ワークフローの値で、書かれなかった項目はワークフローの値のまま。
+    nodes.samplers にない段の項目は無視する。
     """
     wf = copy.deepcopy(workflow)
 
@@ -31,12 +34,19 @@ def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
             put(cfg.anima_negative, result.negative_anima)
     for b in cfg.seeds:
         put(b, seed)
-    if cfg.denoise and denoise is not None:
-        put(cfg.denoise, denoise)
+    for stage, params in clean_gen(gen).items():
+        if cfg.has_sampler(stage):
+            wf[cfg.samplers[stage]]["inputs"].update(params)
     if cfg.width and cfg.height and result.canvas:
         put(cfg.width, result.canvas["w"])
         put(cfg.height, result.canvas["h"])
     return wf
+
+
+def read_gen(wf: dict, cfg: ComfyConfig) -> dict:
+    """送信するワークフローで実際に使われる生成パラメータ（継承分も含む全項目）。"""
+    return {stage: {p: wf[cfg.samplers[stage]]["inputs"][p] for p in params}
+            for stage, params in GEN_PARAMS.items() if cfg.has_sampler(stage)}
 
 
 # ---- 割り当て候補の推定 ----
@@ -99,6 +109,7 @@ def suggest(wf: dict) -> dict:
                 if {"seed", "positive", "negative", "latent_image"} <= set(d.get("inputs", {}))]
     stage_of: dict[str, str] = {}
     size_node: dict[str, str] = {}
+    sampler_entries: dict[str, dict] = {}  # 段 -> nodes.samplers の候補
 
     for sid in sorted(samplers, key=lambda s: (len(s), s)):
         inputs = wf[sid]["inputs"]
@@ -126,8 +137,7 @@ def suggest(wf: dict) -> dict:
             notes.append(f"{stage}段のサンプラーが複数あります（{sid} は割り当てていません）")
             continue
         stage_of[sid] = stage
-        if stage == "anima" and isinstance(inputs.get("denoise"), (int, float)):
-            nodes["denoise"] = _entry(wf, sid, "denoise")  # i2i 段のみ（t2i 段の denoise は 1 固定）
+        sampler_entries[stage] = _entry(wf, sid, "-")
         if pos:
             nodes[f"{stage}Positive"] = _entry(wf, pos, "text")
         if neg:
@@ -141,6 +151,8 @@ def suggest(wf: dict) -> dict:
     elif size_node:
         notes.append("画像サイズのノードがMOSS段にありません")
     nodes["seed"] = [_entry(wf, sid, "seed") for sid in stage_of]
+    if sampler_entries:
+        nodes["samplers"] = sampler_entries  # Scene.gen（steps / cfg / denoise）で上書きするサンプラー
 
     outputs: dict[str, list[str]] = {s: [] for s in STAGES}
     for nid, d in wf.items():
@@ -169,6 +181,10 @@ def suggestion_to_yaml(s: dict) -> str:
         if key == "seed":
             lines.append("  seed:")
             lines += [f"    - {fmt(x)}   # {x['title']} ({x['class_type']})" for x in e]
+        elif key == "samplers":
+            lines.append("  samplers:")
+            lines += [f'    {stage}: {{node: "{x["node"]}"}}   # {x["title"]} ({x["class_type"]})'
+                      for stage, x in e.items()]
         else:
             lines.append(f"  {key}: {fmt(e)}   # {e['title']} ({e['class_type']})")
     lines.append("outputs:")

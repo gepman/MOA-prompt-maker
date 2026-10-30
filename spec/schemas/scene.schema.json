@@ -39,10 +39,15 @@
       "type": "boolean",
       "default": false
     },
+    "gen": {
+      "$ref": "#/$defs/gen"
+    },
     "denoise": {
       "type": "number",
       "minimum": 0,
-      "maximum": 1
+      "maximum": 1,
+      "deprecated": true,
+      "description": "v1.3 の旧キー。gen.anima.denoise を使う"
     },
     "compiled": {
       "type": "object",
@@ -63,7 +68,9 @@
             "null"
           ],
           "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "deprecated": true,
+          "description": "v1.3 の旧キー。compiled.gen を使う"
         },
         "seed": {
           "type": [
@@ -76,11 +83,63 @@
           "items": {
             "type": "string"
           }
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
         }
       }
     },
     "name": {
       "type": "string"
+    }
+  },
+  "$defs": {
+    "steps": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "cfg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "denoise": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "gen": {
+      "description": "生成パラメータ。書いた項目だけワークフローの値を上書きする（MOSS段に denoise はない）",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "moss": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "steps": {
+              "$ref": "#/$defs/steps"
+            },
+            "cfg": {
+              "$ref": "#/$defs/cfg"
+            }
+          }
+        },
+        "anima": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "steps": {
+              "$ref": "#/$defs/steps"
+            },
+            "cfg": {
+              "$ref": "#/$defs/cfg"
+            },
+            "denoise": {
+              "$ref": "#/$defs/denoise"
+            }
+          }
+        }
+      }
     }
   }
 }

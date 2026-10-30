@@ -13,6 +13,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from moa.core import Repository, Scene, compile_scene, new_scene_id, resolve_outfit, save_scene
+from moa.core.gen import GEN_PARAMS, clean_gen, normalize_value
 from moa.core.models import has_error
 from moa.core.scene_io import GenerationRecord
 from moa.core.repository import is_scene_dict
@@ -25,7 +26,8 @@ INHERIT = "__inherit__"
 def new_sc() -> dict:
     return {"situation_id": None, "scene_id": None, "scene_name": "",
             "cast": {}, "outfits": {}, "apply_negative": False,
-            "denoise": None}  # 開いたSceneに保存されていた denoise（スライダーの値そのものではない）
+            "gen": {},        # 開いたSceneに保存されていた Scene.gen（操作中の値は gp 側）
+            "open_seq": 0}    # Scene を開くたびに増える。gp が「開き直し」を検知するための番号
 
 
 def new_nav() -> dict:
@@ -40,7 +42,7 @@ def build_scene(sc: dict) -> Scene | None:
     sid = sc["scene_id"] or f"{sc['situation_id']}__draft"
     return Scene(id=sid, situation=sc["situation_id"], cast=dict(sc["cast"]),
                  name=sc["scene_name"] or None, outfits=dict(sc["outfits"]),
-                 apply_negative=sc["apply_negative"], denoise=sc["denoise"])
+                 apply_negative=sc["apply_negative"], gen=copy.deepcopy(sc["gen"]))
 
 
 def slots_of(repo: Repository, sc: dict) -> list[str]:
@@ -105,6 +107,7 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
     if t == "situation":
         if entry.kind == "situation":
             prev, sc = sc, new_sc()
+            sc["open_seq"] = prev["open_seq"]
             sc["situation_id"] = entry.id
             # 選び直しでは、新しいSituationにも存在するスロットのキャスト・服装を引き継ぐ
             for slot in entry.obj.slots:
@@ -116,7 +119,8 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
             s: Scene = entry.obj
             sc = {"situation_id": s.situation, "scene_id": s.id, "scene_name": s.name or "",
                   "cast": dict(s.cast), "outfits": dict(s.outfits),
-                  "apply_negative": s.apply_negative, "denoise": s.denoise}
+                  "apply_negative": s.apply_negative, "gen": copy.deepcopy(s.gen),
+                  "open_seq": sc["open_seq"] + 1}
         else:
             return sc, nav, f"⚠ ここでは Situation か Scene を選んでください（{entry.kind}）"
         slots = slots_of(repo, sc)
@@ -261,35 +265,28 @@ def next_scene_slug(repo: Repository, sc: dict) -> str:
     return f"{base}_{n}"
 
 
-def round_denoise(value) -> float | None:
-    """スライダーの値を、YAMLに書いても崩れない桁数にする。"""
-    return None if value is None else round(float(value), 4)
+def generation_matches(generated: dict | None, result) -> bool:
+    """生成結果が、今のコンパイル結果から作られたものか。
 
-
-def _same_denoise(a: float | None, b: float | None) -> bool:
-    return a is None and b is None or (a is not None and b is not None and abs(a - b) < 1e-9)
-
-
-def generation_matches(generated: dict | None, result, denoise: float | None = None) -> bool:
-    """生成結果が、今のコンパイル結果と denoise から作られたものか。"""
+    生成パラメータ（gen）は一致を求めない。compiled.gen に「実際に使った値」を記録するので、
+    生成後にスライダーを動かして保存しても、画像と記録は食い違わない。
+    """
     return bool(generated) and (
         generated["moss_prompt"] == result.moss_prompt
         and generated["anima_prompt"] == result.anima_prompt
-        and generated["negative_applied"] == result.apply_negative
-        and _same_denoise(generated.get("denoise"), denoise))
+        and generated["negative_applied"] == result.apply_negative)
 
 
 def save(repo: Repository, sc: dict, slug: str, display_name: str,
-         generated: dict | None = None, denoise: float | None = None) -> tuple[dict, str]:
+         generated: dict | None = None, gen_params: dict | None = None) -> tuple[dict, str]:
     """Scene名が空なら `<名前>_N` で新規保存。既存Sceneの上書きは、同じScene名を明示したときだけ。
 
-    generated（生成結果）は、今の内容と denoise が一致するときだけ seed / images として記録する。
-    denoise（スライダーの値）は Scene に保存する。None（ComfyUI連携が無効）なら既存の値に触れない。
+    generated（生成結果）は、今の内容から作られたものであるときだけ seed / images / gen として記録する。
+    gen_params は、画面で上書きした項目（gp["gen"]）。Scene.gen として保存する。
     """
     sc = copy.deepcopy(sc)
-    denoise = round_denoise(denoise)
-    if denoise is not None:
-        sc["denoise"] = denoise
+    if gen_params is not None:
+        sc["gen"] = clean_gen(gen_params)
     if not sc["situation_id"]:
         return sc, "⚠ Situation が未選択です"
     if display_name.strip():
@@ -305,8 +302,8 @@ def save(repo: Repository, sc: dict, slug: str, display_name: str,
         if has_error(result.issues):
             return sc, "❌ 検証エラーがあるため保存できません"
         record = None
-        if generation_matches(generated, result, denoise):
-            record = GenerationRecord(generated["seed"], list(generated["images"]), generated.get("denoise"))
+        if generation_matches(generated, result):
+            record = GenerationRecord(generated["seed"], list(generated["images"]), generated.get("gen"))
         path = save_scene(repo, scene, result, generation=record)
     except ValueError as e:
         return sc, f"⚠ {e}"
@@ -318,3 +315,62 @@ def save(repo: Repository, sc: dict, slug: str, display_name: str,
     elif generated:
         msg += "\n\nℹ 生成後に内容が変わったため、生成結果（シード・画像）は記録していません"
     return sc, msg
+
+
+# ---- 生成パラメータ（Scene.gen）----
+# gp = {"seq": open_seq, "gen": {段: {項目: 値}}}  … 画面で上書きした項目だけを持つ（動かした項目だけ Scene.gen に保存）
+PARAM_LABEL = {"steps": "steps", "cfg": "cfg", "denoise": "denoise"}
+ITEMS = [(stage, param) for stage, params in GEN_PARAMS.items() for param in params]
+SOURCE_LABEL = {"scene": "Scene", "workflow": "ワークフロー"}
+
+
+def new_gp() -> dict:
+    return {"seq": 0, "gen": {}}
+
+
+def sync_gp(sc: dict, gp: dict) -> dict:
+    """Scene を（開き直しも含めて）開いたら、その Scene.gen を操作中の値にする。
+
+    Situation を選び直しただけのときは番号が変わらないので、操作中の値を保つ。
+    """
+    if sc["open_seq"] != gp["seq"]:
+        return {"seq": sc["open_seq"], "gen": clean_gen(sc["gen"])}
+    return gp
+
+
+def set_override(gp: dict, stage: str, param: str, value) -> dict:
+    gp = copy.deepcopy(gp)
+    gp["gen"].setdefault(stage, {})[param] = normalize_value(param, value)
+    gp["gen"] = clean_gen(gp["gen"])
+    return gp
+
+
+def clear_override(gp: dict, stage: str, param: str) -> dict:
+    """その項目を Scene.gen から削除する（ワークフローの値に戻す）。"""
+    gp = copy.deepcopy(gp)
+    gp["gen"].get(stage, {}).pop(param, None)
+    gp["gen"] = clean_gen(gp["gen"])
+    return gp
+
+
+def param_state(cfg, gp: dict, stage: str, param: str) -> dict:
+    """スライダーに出す値・出どころ（Scene / ワークフロー）・上書き中か・操作できるか。"""
+    if cfg is None or not cfg.has_sampler(stage):
+        return {"value": None, "source": None, "overridden": False, "enabled": False}
+    over = gp["gen"].get(stage, {}).get(param)
+    if over is not None:
+        return {"value": over, "source": "scene", "overridden": True, "enabled": True}
+    return {"value": cfg.workflow_value(stage, param), "source": "workflow", "overridden": False, "enabled": True}
+
+
+def source_text(state: dict) -> str:
+    if state["source"] is None:
+        return "_（未設定）_"
+    return f"出どころ：**{SOURCE_LABEL[state['source']]}**"
+
+
+def gen_summary(gen: dict) -> str:
+    """生成時に使った値の一覧（継承分も含む）。"""
+    labels = {"moss": "MOSS段", "anima": "Anima段"}
+    return " ／ ".join(f"{labels[s]}：" + ", ".join(f"{p} {v}" for p, v in params.items())
+                       for s, params in gen.items() if params)

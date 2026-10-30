@@ -95,15 +95,19 @@ class Scene:
     name: str | None = None
     outfits: dict[str, str | None] = field(default_factory=dict)
     apply_negative: bool = False
-    denoise: float | None = None  # Anima i2i の denoise（未設定ならワークフローの値）
+    gen: dict = field(default_factory=dict)  # 書いた項目だけワークフローの値を上書きする（13.5章）
 
     @classmethod
     def from_dict(cls, d: dict) -> "Scene":
+        gen = {stage: dict(params or {}) for stage, params in (d.get("gen") or {}).items()}
+        legacy = d.get("denoise")  # v1.3 の旧キー。gen.anima.denoise として扱う
+        if legacy is not None and "denoise" not in gen.get("anima", {}):
+            gen.setdefault("anima", {})["denoise"] = legacy
         return cls(
             id=d["id"], situation=d["situation"], cast=dict(d["cast"]),
             name=d.get("name"), outfits=dict(d.get("outfits") or {}),
             apply_negative=bool(d.get("applyNegative", False)),
-            denoise=d.get("denoise"),
+            gen=gen,
         )
 
 

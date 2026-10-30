@@ -228,38 +228,93 @@ def test_save_does_not_record_stale_generation(repo, data_dir):
     assert "記録していません" in L.save(repo, sc, "stale2", "", gen2)[1]
 
 
-# ---- denoise ----
-def test_opening_scene_exposes_its_saved_denoise(repo, data_dir):
+# ---- 生成パラメータ（gen）----
+def _cfg():
+    from conftest import ROOT
+    from moa.comfy import load_config
+    cfg, issues = load_config(ROOT / "config.yaml")
+    assert cfg is not None, issues
+    return cfg
+
+
+def test_opening_scene_loads_its_gen_into_gp(repo, data_dir):
     edit(data_dir / "situations" / "beach" / "beach_chat__trio.yaml", "applyNegative: false",
-         "applyNegative: false\ndenoise: 0.6")
+         "applyNegative: false\ngen:\n  anima: { denoise: 0.45 }")
     repo.reload()
     sc = _open_trio(repo)
-    assert sc["denoise"] == 0.6
-    assert L.build_scene(sc).denoise == 0.6
-    assert L.new_sc()["denoise"] is None
+    assert sc["gen"] == {"anima": {"denoise": 0.45}}
+    assert L.sync_gp(sc, L.new_gp())["gen"] == {"anima": {"denoise": 0.45}}
+    assert L.build_scene(sc).gen == {"anima": {"denoise": 0.45}}
 
 
-def test_save_stores_slider_denoise_and_rounds_it(repo, data_dir):
+def test_gp_is_kept_on_situation_reselect_and_replaced_when_a_scene_is_opened(repo):
+    sc = _open_trio(repo)
+    gp = L.set_override(L.sync_gp(sc, L.new_gp()), "moss", "steps", 20)
+
+    nav = L.set_target(L.new_nav(), "situation")
+    nav["cwd"]["situations"] = "situations/beach"
+    sc2, _, _ = L.apply_entry(repo, sc, nav, repo.entry("situation", "beach_chat"))
+    assert L.sync_gp(sc2, gp) == gp                                  # Situation を選び直しても操作中の値は残る
+
+    sc3, _, _ = L.apply_entry(repo, sc2, nav, repo.entry("scene", "beach_chat__trio"))
+    assert L.sync_gp(sc3, gp)["gen"] == {}                           # Scene を開き直すと、Scene.gen（なし）に戻る
+
+
+def test_set_and_clear_override_normalize_and_prune():
+    gp = L.set_override(L.new_gp(), "anima", "denoise", 0.30000000000000004)
+    gp = L.set_override(gp, "anima", "steps", 14.0)
+    assert gp["gen"] == {"anima": {"steps": 14, "denoise": 0.3}} and isinstance(gp["gen"]["anima"]["steps"], int)
+    gp = L.clear_override(gp, "anima", "steps")
+    assert gp["gen"] == {"anima": {"denoise": 0.3}}
+    assert L.clear_override(gp, "anima", "denoise")["gen"] == {}     # 空になった段は消える
+    assert L.clear_override(gp, "moss", "steps") == gp               # 無い項目の削除は何も起きない
+
+
+def test_param_state_shows_where_each_value_comes_from():
+    cfg = _cfg()
+    gp = L.new_gp()
+    st = L.param_state(cfg, gp, "moss", "steps")
+    assert (st["value"], st["source"], st["overridden"], st["enabled"]) == (50, "workflow", False, True)
+    assert "ワークフロー" in L.source_text(st)
+
+    gp = L.set_override(gp, "moss", "steps", 20)
+    st = L.param_state(cfg, gp, "moss", "steps")
+    assert (st["value"], st["source"], st["overridden"]) == (20, "scene", True) and "Scene" in L.source_text(st)
+    assert L.param_state(cfg, gp, "anima", "denoise")["value"] == 0.35   # 他の項目は影響しない
+
+    off = L.param_state(None, gp, "moss", "steps")
+    assert off["enabled"] is False and off["value"] is None
+
+
+def test_save_stores_only_the_overridden_items(repo, data_dir):
     from moa.core.repository import load_yaml
     sc = _open_trio(repo)
-    sc2, _ = L.save(repo, sc, "dn", "", None, denoise=0.30000000000000004)
-    data = load_yaml(data_dir / "situations" / "beach" / "beach_chat__dn.yaml")
-    assert data["denoise"] == 0.3 and sc2["denoise"] == 0.3
+    sc2, _ = L.save(repo, sc, "g", "", None, gen_params={"moss": {"steps": 20}, "anima": {"denoise": 0.45}})
+    data = load_yaml(data_dir / "situations" / "beach" / "beach_chat__g.yaml")
+    assert data["gen"] == {"moss": {"steps": 20}, "anima": {"denoise": 0.45}} and sc2["gen"] == data["gen"]
 
-    sc3, _ = L.save(repo, sc, "nodn", "", None, denoise=None)   # 連携無効なら書かない
-    assert "denoise" not in load_yaml(data_dir / "situations" / "beach" / "beach_chat__nodn.yaml")
+    L.save(repo, sc, "empty", "", None, gen_params={})
+    assert "gen" not in load_yaml(data_dir / "situations" / "beach" / "beach_chat__empty.yaml")
 
 
-def test_generation_is_recorded_only_if_denoise_matches(repo, data_dir):
+def test_save_without_gen_params_keeps_the_opened_scenes_gen(repo, data_dir):
+    from moa.core.repository import load_yaml
+    edit(data_dir / "situations" / "beach" / "beach_chat__trio.yaml", "applyNegative: false",
+         "applyNegative: false\ngen:\n  moss: { cfg: 3.0 }")
+    repo.reload()
+    sc = _open_trio(repo)
+    L.save(repo, sc, "keep", "", None)
+    assert load_yaml(data_dir / "situations" / "beach" / "beach_chat__keep.yaml")["gen"] == {"moss": {"cfg": 3.0}}
+
+
+def test_generation_records_the_values_it_used_even_if_sliders_moved_after(repo, data_dir):
     from moa.core.repository import load_yaml
     sc = _open_trio(repo)
-    gen = {**_generated(repo, sc), "denoise": 0.6}
-
-    _, msg = L.save(repo, sc, "same", "", gen, denoise=0.6)
-    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__same.yaml")["compiled"]
-    assert "🖼" in msg and c["denoise"] == 0.6 and c["seed"] == 4242
-
-    # 生成後にスライダーを動かした → 別の内容なので記録しない
-    _, msg = L.save(repo, sc, "moved", "", gen, denoise=0.5)
-    c = load_yaml(data_dir / "situations" / "beach" / "beach_chat__moved.yaml")["compiled"]
-    assert "記録していません" in msg and c["seed"] is None
+    used = {"moss": {"steps": 50, "cfg": 5}, "anima": {"steps": 30, "cfg": 2, "denoise": 0.35}}
+    generated = {**_generated(repo, sc), "gen": used}
+    _, msg = L.save(repo, sc, "later", "", generated, gen_params={"moss": {"steps": 20}})   # 生成後に動かした
+    data = load_yaml(data_dir / "situations" / "beach" / "beach_chat__later.yaml")
+    assert "🖼" in msg
+    assert data["gen"] == {"moss": {"steps": 20}}                    # Scene.gen は今のスライダー
+    assert data["compiled"]["gen"] == used                           # compiled.gen は生成時に使った値
+    assert data["compiled"]["seed"] == 4242

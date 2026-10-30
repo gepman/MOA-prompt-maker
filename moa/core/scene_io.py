@@ -10,6 +10,7 @@ from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from .constants import ID_RE
+from .gen import clean_gen
 from .models import CompileResult, Scene
 
 
@@ -43,21 +44,33 @@ def _sync_mapping(target: CommentedMap, values: dict) -> None:
         target[k] = v
 
 
+def _gen_map(gen: dict) -> CommentedMap:
+    """`moss: { steps: 50, cfg: 3.0 }` のように、段ごとに1行で書く。"""
+    out = CommentedMap()
+    for stage, params in clean_gen(gen).items():
+        leaf = CommentedMap(params)
+        leaf.fa.set_flow_style()
+        out[stage] = leaf
+    return out
+
+
 @dataclass
 class GenerationRecord:
-    """compiled.seed / compiled.images に書く生成結果。images は MOSS段 → Anima段の順。"""
+    """compiled.seed / images / gen に書く生成結果。images は MOSS段 → Anima段の順。"""
     seed: int | None
     images: list[str]
-    denoise: float | None = None  # 生成時に使った denoise
+    gen: dict | None = None  # 生成時に実際に使った値（ワークフローから継承した分も含む全項目）
 
 
 def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = None,
                generation: GenerationRecord | None = None) -> Path:
     """Sceneを保存し compiled にスナップショットを書き込む。errorがあれば保存しない。
 
-    generation があれば seed と images を書く。なければ既存の値を残すが、保存済みの
-    スナップショットと今回のプロンプト／ネガティブ適用が食い違う場合は、画像と内容が
-    合わなくなるため seed と images をリセットする。
+    Scene.gen（上書きした項目だけ）は scene の `gen` に書く。
+    generation があれば seed と images と gen（実際に使った全項目）を compiled に書く。
+    なければ既存の値を残すが、保存済みのスナップショットと今回のプロンプト／ネガティブ適用が
+    食い違う場合は、画像と内容が合わなくなるため seed・images・gen をリセットする。
+    compiled.gen は生成時の記録なので、Scene.gen を変えただけではリセットしない。
     """
     if not result.ok:
         raise ValueError("検証エラーがあるため保存できません")
@@ -94,8 +107,12 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         del doc["outfits"]
 
     doc["applyNegative"] = scene.apply_negative
-    if scene.denoise is not None:
-        doc["denoise"] = scene.denoise
+    gen = _gen_map(scene.gen)
+    if gen:
+        doc["gen"] = gen
+    elif "gen" in doc:
+        del doc["gen"]
+    doc.pop("denoise", None)  # v1.3 の旧キー（gen.anima.denoise に移行）
 
     compiled = doc.get("compiled")
     if not isinstance(compiled, CommentedMap):
@@ -104,22 +121,23 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         compiled["images"] = []
         doc["compiled"] = compiled
     old_moss, old_anima = compiled.get("mossPrompt"), compiled.get("animaPrompt")
-    old_denoise = compiled.get("denoise")
+    compiled.pop("denoise", None)  # v1.3 の旧キー（compiled.gen に移行）
     if generation is not None:
         compiled["seed"] = generation.seed
         compiled["images"] = list(generation.images)
-        if generation.denoise is not None or "denoise" in compiled:
-            compiled["denoise"] = generation.denoise
+        used = _gen_map(generation.gen or {})
+        if used:
+            compiled["gen"] = used
+        elif "gen" in compiled:
+            del compiled["gen"]
     elif old_moss is not None and old_anima is not None and (
             str(old_moss).strip() != result.moss_prompt.strip()
             or str(old_anima).strip() != result.anima_prompt.strip()
-            or bool(compiled.get("negativeApplied", False)) != result.apply_negative
-            or (old_denoise is not None and scene.denoise is not None
-                and abs(old_denoise - scene.denoise) > 1e-9)):
+            or bool(compiled.get("negativeApplied", False)) != result.apply_negative):
         compiled["seed"] = None
         compiled["images"] = []
-        if "denoise" in compiled:
-            compiled["denoise"] = None
+        if "gen" in compiled:
+            del compiled["gen"]
     compiled["mossPrompt"] = _text(result.moss_prompt)
     compiled["animaPrompt"] = _text(result.anima_prompt)
     compiled["negativeApplied"] = result.apply_negative

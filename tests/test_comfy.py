@@ -291,56 +291,92 @@ def test_generate_refuses_when_scene_has_errors(cfg, repo, trio):
         list(iter_run(cfg, bad))
 
 
-# ---- denoise ----
-def test_suggest_finds_denoise_only_on_the_i2i_sampler():
-    n = suggest(json.loads(FIXTURE.read_text(encoding="utf-8")))["nodes"]
-    assert n["denoise"]["node"] == "16" and n["denoise"]["input"] == "denoise"  # 7（t2i, denoise=1）は対象外
+# ---- 生成パラメータ（Scene.gen）----
+from moa.comfy.workflow import read_gen  # noqa: E402
+
+WORKFLOW_VALUES = {"moss": {"steps": 50, "cfg": 5}, "anima": {"steps": 30, "cfg": 2, "denoise": 0.35}}
 
 
-def test_config_denoise_default_comes_from_workflow(cfg):
-    assert cfg.denoise.node == "16" and cfg.default_denoise == 0.35
+def test_suggest_finds_the_samplers_for_scene_gen():
+    s = suggest(json.loads(FIXTURE.read_text(encoding="utf-8")))
+    assert (s["nodes"]["samplers"]["moss"]["node"], s["nodes"]["samplers"]["anima"]["node"]) == ("7", "16")
+    assert "denoise" not in s["nodes"]
+    assert '  samplers:\n    moss: {node: "7"}' in suggestion_to_yaml(s)
 
 
-def test_config_denoise_is_optional(cfg_path):
-    edit(cfg_path, 'denoise: {node: "16", input: denoise}', '# denoise: {node: "16", input: denoise}')
+def test_config_samplers_expose_workflow_values(cfg):
+    assert cfg.samplers == {"moss": "7", "anima": "16"}
+    for stage, params in WORKFLOW_VALUES.items():
+        assert {p: cfg.workflow_value(stage, p) for p in params} == params
+
+
+def test_config_samplers_are_optional(cfg_path):
+    edit(cfg_path, "  samplers:", "  _off:")
     c, issues = load_config(cfg_path)
-    assert c is not None and c.denoise is None and c.default_denoise is None
+    assert c is not None and c.samplers == {} and not c.has_sampler("moss")
 
 
-@pytest.mark.parametrize("new,expect", [
-    ('denoise: {node: "99", input: denoise}', "ノード '99'"),
-    ('denoise: {node: "16", input: sampler_name}', "0〜1 の数値ではありません"),   # 値が "euler"
-    ('denoise: {node: "16", input: model}', "接続されており"),
+@pytest.mark.parametrize("old,new,expect", [
+    ('moss:  {node: "7"}', 'moss:  {node: "99"}', "ノード '99'"),
+    ('anima: {node: "16"}', 'anima: {node: "6"}', "入力 'steps'"),      # サイズ用ノードには steps がない
+    ('moss:  {node: "7"}', 'moss:  {node: "4"}', "入力 'steps'"),       # CLIPTextEncode
+    ('anima: {node: "16"}', 'anime: {node: "16"}', "moss / anima のいずれか"),
+    ('anima: {node: "16"}', 'anima: {}', "ノードid"),
 ])
-def test_config_denoise_validation(cfg_path, new, expect):
-    edit(cfg_path, 'denoise: {node: "16", input: denoise}', new)
+def test_config_samplers_validation(cfg_path, old, new, expect):
+    edit(cfg_path, old, new)
     c, issues = load_config(cfg_path)
     assert c is None and any(expect in i.message for i in issues if i.level == "error"), issues
 
 
-def test_apply_denoise_rewrites_only_the_bound_node(cfg, result):
-    wf = apply(cfg.workflow, cfg, result, 1, denoise=0.6)
-    assert wf["16"]["inputs"]["denoise"] == 0.6
-    assert wf["7"]["inputs"]["denoise"] == 1  # MOSS段のサンプラーには触らない
-    assert apply(cfg.workflow, cfg, result, 1)["16"]["inputs"]["denoise"] == 0.35  # 未指定ならワークフローの値
-    assert cfg.workflow["16"]["inputs"]["denoise"] == 0.35  # 元は変更されない
+def test_config_rejects_out_of_range_workflow_values(cfg_path):
+    wf = cfg_path.parent / "workflow.json"
+    wf.write_text(wf.read_text(encoding="utf-8").replace('"steps": 50', '"steps": 0'), encoding="utf-8")
+    c, issues = load_config(cfg_path)
+    assert c is None and any("steps" in i.message and "不正" in i.message for i in issues)
 
 
-def test_apply_ignores_denoise_without_binding(cfg, result):
-    cfg.denoise = None
-    assert apply(cfg.workflow, cfg, result, 1, denoise=0.9)["16"]["inputs"]["denoise"] == 0.35
+def test_config_old_denoise_node_is_a_warning(cfg_path):
+    edit(cfg_path, "  samplers:", '  denoise: {node: "16", input: denoise}\n  samplers:')
+    c, issues = load_config(cfg_path)
+    assert c is not None and any(i.level == "warning" and "nodes.samplers.anima" in i.message for i in issues)
 
 
-def test_generate_sends_and_reports_denoise(fake, cfg, result):
+def test_apply_gen_overrides_only_the_listed_items(cfg, result):
+    gen = {"moss": {"steps": 20, "cfg": 3.5}, "anima": {"denoise": 0.45}}
+    wf = apply(cfg.workflow, cfg, result, 1, gen)
+    assert (wf["7"]["inputs"]["steps"], wf["7"]["inputs"]["cfg"]) == (20, 3.5)
+    assert wf["16"]["inputs"]["denoise"] == 0.45
+    assert (wf["16"]["inputs"]["steps"], wf["16"]["inputs"]["cfg"]) == (30, 2)   # 書かれなかった項目はワークフローの値
+    assert wf["7"]["inputs"]["denoise"] == 1                                    # MOSS段の denoise には触れない
+    assert cfg.workflow["7"]["inputs"]["steps"] == 50                           # 元は変更されない
+    assert apply(cfg.workflow, cfg, result, 1, None) == apply(cfg.workflow, cfg, result, 1, {})
+
+
+def test_apply_ignores_moss_denoise_and_stages_without_sampler(cfg, result):
+    assert apply(cfg.workflow, cfg, result, 1, {"moss": {"denoise": 0.9}})["7"]["inputs"]["denoise"] == 1
+    del cfg.samplers["anima"]
+    wf = apply(cfg.workflow, cfg, result, 1, {"anima": {"steps": 5}})
+    assert wf["16"]["inputs"]["steps"] == 30
+
+
+def test_read_gen_returns_every_item_including_inherited(cfg, result):
+    wf = apply(cfg.workflow, cfg, result, 1, {"anima": {"steps": 14}})
+    assert read_gen(wf, cfg) == {"moss": {"steps": 50, "cfg": 5},
+                                 "anima": {"steps": 14, "cfg": 2, "denoise": 0.35}}
+
+
+def test_generate_sends_gen_and_reports_all_used_values(fake, cfg, result):
     server = fake()
-    gen = run(cfg, result, client=client_for(server, cfg), seed=1, denoise=0.6)
-    assert server.submitted[0]["16"]["inputs"]["denoise"] == 0.6
-    assert gen.denoise == 0.6 and gen.record().denoise == 0.6
+    over = {"moss": {"cfg": 3.0}, "anima": {"steps": 14, "cfg": 1.8, "denoise": 0.45}}
+    gen = run(cfg, result, client=client_for(server, cfg), seed=1, gen=over)
+    sent = server.submitted[0]
+    assert (sent["7"]["inputs"]["steps"], sent["7"]["inputs"]["cfg"]) == (50, 3.0)
+    assert (sent["16"]["inputs"]["steps"], sent["16"]["inputs"]["cfg"], sent["16"]["inputs"]["denoise"]) == (14, 1.8, 0.45)
+    used = {"moss": {"steps": 50, "cfg": 3.0}, "anima": {"steps": 14, "cfg": 1.8, "denoise": 0.45}}
+    assert gen.gen == used and gen.record().gen == used          # 継承分(moss.steps)も含めて記録
 
 
-def test_generate_without_binding_leaves_workflow_denoise_and_records_none(fake, cfg, result):
-    cfg.denoise = None
-    server = fake()
-    gen = run(cfg, result, client=client_for(server, cfg), seed=1, denoise=0.9)
-    assert server.submitted[0]["16"]["inputs"]["denoise"] == 0.35
-    assert gen.denoise is None
+def test_generate_without_overrides_records_workflow_values(fake, cfg, result):
+    gen = run(cfg, result, client=client_for(fake(), cfg), seed=1)
+    assert gen.gen == WORKFLOW_VALUES
