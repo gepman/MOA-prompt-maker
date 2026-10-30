@@ -1,0 +1,22 @@
+id: beach_chat
+name: 海辺で談笑
+tags: [海辺, 日常]
+rating: safe
+slots: [left, center, right]
+canvas: { w: 1536, h: 1024 }
+mossPrompt: |
+  {
+    "summary": {"meta": ["anime illustration", "safe", "beach scene"], "canvas": "single", "caption": "Anime illustration at a sunny beach: three adult women standing on the sand by the sea, chatting and laughing together in a friendly conversation."},
+    "items": [
+      {"label": "object", "caption": "{{left}} {{left.outfit}} She laughs with her mouth open, one hand raised mid-gesture as she talks.", "bbox": [-380, -640, 320, -260]},
+      {"label": "object", "caption": "{{center}} {{center.outfit}} She laughs with her head tilted slightly back, both hands clasped in front of her chest.", "bbox": [-380, -190, 320, 190]},
+      {"label": "object", "caption": "{{right}} {{right.outfit}} She giggles with one hand held near her mouth, her shoulders shaking.", "bbox": [-380, 260, 320, 640]}
+    ],
+    "bbox_coord_space": "abs_centralized", "bbox_format": "yxyx"
+  }
+animaPrompt: |
+  masterpiece, best quality, score_7, safe, 3girls, {{left}}, {{center}}, {{right}}, {{left.outfit}}, {{center.outfit}}, {{right.outfit}}, beach, ocean, sand, blue sky, standing, talking, laughing, smile, open mouth, outdoors, daytime
+negativeMoss: |
+  photorealistic, realistic, duplicate, split screen, text, watermark, blurry, low quality, worst quality
+negativeAnima: |
+  worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration, duplicate

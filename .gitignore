@@ -1,0 +1,10 @@
+# 仮想環境・テスト用データ
+.venv/
+testdata/
+
+# 自動生成物
+__pycache__/
+*.pyc
+.pytest_cache/
+.gradio/
+*.yaml.tmp

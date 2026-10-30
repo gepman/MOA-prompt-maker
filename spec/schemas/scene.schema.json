@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scene.schema.json",
+  "title": "Scene",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "situation",
+    "cast"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "situation": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "cast": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]+$"
+      }
+    },
+    "outfits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "applyNegative": {
+      "type": "boolean",
+      "default": false
+    },
+    "compiled": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mossPrompt": {
+          "type": "string"
+        },
+        "animaPrompt": {
+          "type": "string"
+        },
+        "negativeApplied": {
+          "type": "boolean"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "name": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "character.schema.json",
+  "title": "Character",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "moss", "anima"],
+  "properties": {
+    "id":    { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "name":  { "type": "string" },
+    "group": { "type": "string" },
+    "tags":  { "type": "array", "items": { "type": "string" } },
+    "defaultOutfit": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "moss":  { "type": "string" },
+    "anima": { "type": "string" },
+    "negativeMoss":  { "type": "string" },
+    "negativeAnima": { "type": "string" }
+  }
+}

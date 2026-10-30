@@ -1,0 +1,13 @@
+id: beach_chat__trio
+name: 海辺で談笑（ポケモントリオ）
+situation: beach_chat
+cast:
+  left: skyla_bw
+  center: elesa_bw
+  right: hex_maniac_xy
+applyNegative: false
+compiled:
+  seed: null
+  images: []
+# 実際にコンパイルすると compiled.mossPrompt / compiled.animaPrompt に最終文字列が入る。
+# このシーンのコンパイル結果は samples/examples/ を参照。
