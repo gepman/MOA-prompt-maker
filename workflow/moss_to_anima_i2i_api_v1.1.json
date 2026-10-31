@@ -44,7 +44,7 @@
   },
   "5": {
     "inputs": {
-      "text": "nsfw, worst quality, bad anatomy, watermark, jpeg artifact",
+      "text": "worst quality, bad anatomy, watermark, jpeg artifact",
       "clip": [
         "2",
         0
@@ -70,8 +70,8 @@
     "inputs": {
       "seed": 539505033095114,
       "steps": 50,
-      "cfg": 5,
-      "sampler_name": "er_sde",
+      "cfg": 3,
+      "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1,
       "model": [
@@ -202,7 +202,7 @@
       "seed": 792776031243328,
       "steps": 30,
       "cfg": 2,
-      "sampler_name": "euler",
+      "sampler_name": "er_sde",
       "scheduler": "simple",
       "denoise": 0.35,
       "model": [
