@@ -16,6 +16,8 @@ from ruamel.yaml import YAML
 from moa.comfy.generate import differences
 from moa.core import CastEntry, Repository, Scene, compile_scene, resolve_outfit, save_scene, validate_scene_id
 from moa.core.constants import ROOTS
+from moa.core.filestamp import ExternalChangeError
+from moa.core.folders import create_folder
 from moa.core.gen import GEN_PARAMS, clean_gen, normalize_value
 from moa.core.models import CompileResult, Issue, has_error
 from moa.core.scene_io import GenerationRecord
@@ -26,12 +28,14 @@ SECTION = {"scene": "scenes", "action": "actions", "background": "backgrounds",
            "char": "characters", "outfit": "outfits", "savedir": "scenes"}
 KIND = {"scene": "scene", "action": "action", "background": "background", "char": "character", "outfit": "outfit"}
 INHERIT = "__inherit__"
+EXTERNAL_PREFIX = "⚠ ファイルが外部で変更されています"   # save() がこの文言で始まるメッセージを返したら、2択を出す
 BG_SOURCE = {"action": "Action の推奨背景", "user": "選んだ背景", "scene": "開いた Scene の背景"}
 
 
 def new_sc() -> dict:
     return {"scene_id": None, "scene_name": "", "background_id": None, "bg_source": None, "action_id": None,
             "cast": {}, "apply_negative": False,
+            "stamp": None,    # 開いたSceneのファイルの更新情報（外部変更の検知用。EDITOR_SPEC 12章-4）
             "gen": {},        # 開いたSceneに保存されていた Scene.gen（操作中の値は gp 側）
             "open_seq": 0}    # Scene を開くたびに増える。gp が「開き直し」を検知するための番号
 
@@ -138,6 +142,27 @@ def _set_cwd(repo: Repository, nav: dict, folder: Path) -> dict:
     return nav
 
 
+def make_savedir(repo: Repository, nav: dict, name: str) -> str:
+    """保存先を選ぶ画面で開いているフォルダの中に、新しいフォルダを作る（EDITOR_SPEC 12章-3。名前の検証は 2章と同じ）。"""
+    if nav["target"] != "savedir":
+        return "⚠ 先に「保存先フォルダを選ぶ」を押して、フォルダを作る場所を開いてください"
+    try:
+        path = create_folder(repo.root / "scenes", _cwd(repo, nav), (name or "").strip())
+    except ValueError as e:
+        return f"⚠ {e}"
+    return f"📁 フォルダを作りました：`{repo.rel(path)}/`（開いて「このフォルダを保存先にする」で選べます）"
+
+
+def reopen_scene(repo: Repository, sc: dict, nav: dict) -> tuple[dict, dict, str]:
+    """外部変更の確認で［再読み込み（編集を破棄）］を選んだとき：データを読み直し、開いている Scene を開き直す。"""
+    repo.reload()
+    entry = repo.entry("scene", sc["scene_id"]) if sc["scene_id"] else None
+    if entry is None:
+        return sc, nav, "⚠ 開いている Scene が見つかりません"
+    nav = set_target(nav, "scene")
+    return apply_entry(repo, sc, nav, entry)
+
+
 def choose_savedir(repo: Repository, nav: dict) -> tuple[dict, str]:
     """今開いているフォルダを、新規 Scene の保存先にする。"""
     if nav["target"] != "savedir":
@@ -174,8 +199,9 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
         sc = {"scene_id": s.id, "scene_name": s.name or "", "background_id": s.background, "bg_source": "scene",
               "action_id": s.action,
               "cast": {slot: {"character": e.character, "outfit": e.outfit} for slot, e in s.cast.items()},
-              "apply_negative": s.apply_negative, "gen": copy.deepcopy(s.gen), "open_seq": sc["open_seq"] + 1}
-        return sc, _next_target(repo, sc, nav), f"✅ Scene を開きました：{s.name or s.id}"
+              "apply_negative": s.apply_negative, "gen": copy.deepcopy(s.gen), "open_seq": sc["open_seq"] + 1,
+              "stamp": list(entry.stamp) if entry.stamp else None}
+        return sc, _next_target(repo, sc, nav), f"✅ Scene を開きました：{s.name or s.id}" + stale_note(repo, entry)
 
     if t == "action":
         prev = sc
@@ -251,6 +277,27 @@ def from_upload(repo: Repository, sc: dict, nav: dict, uploaded: str | None) -> 
     if data != entry.raw:
         msg += f"\n⚠ アップロードされた内容は data/ 側と異なります。data/ 側（{repo.rel(entry.path)}）を使用しました"
     return sc, nav, msg
+
+
+# ---- マスターデータ変更の表示（EDITOR_SPEC 12章-1）----
+def stale_note(repo: Repository, entry) -> str:
+    """保存済みの compiled.mossPrompt / animaPrompt と、今コンパイルした結果が違えば、その旨と違いの中身を返す。
+
+    compiled にプロンプトが無い Scene、今コンパイルできない Scene（エラーあり）では何も返さない。
+    """
+    compiled = entry.raw.get("compiled") or {}
+    saved = {"MOSS": compiled.get("mossPrompt"), "Anima": compiled.get("animaPrompt")}
+    if all(v is None for v in saved.values()):
+        return ""
+    result = compile_scene(repo, entry.obj)
+    if not result.ok:
+        return ""
+    now = {"MOSS": result.moss_prompt, "Anima": result.anima_prompt}
+    diff = [k for k in saved if saved[k] is not None and str(saved[k]).strip() != now[k].strip()]
+    if not diff:
+        return ""
+    return ("\n⚠ 保存時から内容が変わっています（キャラ・服装・背景・行為の編集など）："
+            + " / ".join(diff) + " のプロンプトが違います")
 
 
 # ---- キャスト枠の表示 ----
@@ -348,15 +395,18 @@ def auto_scene_id(repo: Repository, sc: dict) -> str:
 
 
 def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str, generated: dict | None = None,
-         gen_params: dict | None = None, effective: dict | None = None) -> tuple[dict, str]:
+         gen_params: dict | None = None, effective: dict | None = None, force: bool = False) -> tuple[dict, str]:
     """Scene を保存する。id が空なら `<名前>_N` で新規保存。既存 Scene の上書きは、同じ id を明示したときだけ。
 
     generated（生成結果のスナップショット）は、生成時と今で食い違う項目がなければ seed / images / gen / partial として記録する。
     食い違うときは、記録せず、違った項目名を返すメッセージに列挙する。
     gen_params は画面で上書きした項目（gp["gen"]）で、Scene.gen として保存する。
     effective は gen の実効値（記録条件の比較用。ComfyUI 連携が無効なら None）。
+    既存の Scene を書くとき、読み込み後にファイルが外部で変更されていれば保存を止める（EXTERNAL_PREFIX で始まるメッセージ）。
+    force=True はその確認で［上書き保存］を選んだとき。
     """
     sc = copy.deepcopy(sc)
+    sc_before_id = sc["scene_id"]   # 開いている Scene の id（scene_id を書き換える前）
     if not sc["action_id"]:
         return sc, "⚠ Action が未選択です"
     if not sc["background_id"]:
@@ -385,11 +435,19 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
                                           partial=bool(generated.get("partial")))
                 note = (f"\n\n🖼 シード {record.seed} と画像 {len(record.images)} 枚のパスを記録しました"
                         + ("（MOSS段だけの部分結果。`compiled.partial: true`）" if record.partial else ""))
+        expected = None
+        if overwrite and not force:
+            opened = sc["scene_id"] == sc_before_id and sc.get("stamp")
+            expected = tuple(sc["stamp"]) if opened else repo.entry("scene", sc["scene_id"]).stamp
         path = save_scene(repo, scene, result, generation=record,
-                          folder=None if overwrite else save_dir_path(repo, nav))
+                          folder=None if overwrite else save_dir_path(repo, nav), expected_stamp=expected)
+    except ExternalChangeError:
+        return sc, EXTERNAL_PREFIX + "（VS Code・エディタ・エクスプローラーなど）。読み直すか、上書きするか選んでください"
     except ValueError as e:
         return sc, f"⚠ {e}"
     repo.reload()
+    entry = repo.entry("scene", sc["scene_id"])
+    sc["stamp"] = list(entry.stamp) if entry and entry.stamp else None
     verb = "上書き保存しました" if overwrite else "新規保存しました"
     return sc, f"💾 {verb}：`{path}`{note}"
 

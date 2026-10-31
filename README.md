@@ -45,7 +45,7 @@ python -m venv .venv
 | `--data` | `data` | データフォルダ（上の5つのルートを含む） |
 | `--config` | `config.yaml` | ComfyUI 連携の設定ファイル |
 | `--comfy-url` | （設定ファイルの値） | ComfyUI の URL。設定ファイルより優先 |
-| `--host` / `--port` | `127.0.0.1` / `7860` | 待ち受けるアドレスとポート（他端末から開くときは `--host 0.0.0.0`） |
+| `--host` / `--port` | `127.0.0.1` / `7860`（`config.yaml` の `builder.port`） | 待ち受けるアドレスとポート（他端末から開くときは `--host 0.0.0.0`） |
 
 まず試すだけなら、同梱のサンプルデータで起動できます。
 **保存すると YAML が書き換わる**ので、サンプルを触りたくないときはコピーしたフォルダを指定してください。
@@ -129,6 +129,28 @@ MOSS 用か Anima 用かは書きません。MOSS 側では MOSS 用の文章に
 コンパイラが `1girl, solo` や `2girls, 1boy` を付けます。Action や Background の anima に書かれた人数タグ・`solo` は、
 コンパイル時に除去して警告します（キャラ・服装のブロック内は除去しません）。
 キャスト以外の特定の人物（例：説明を聞いている男の子）は、Action に `extras: { male: 1 }` のように書くと、人数タグに数えられます。
+
+## エディタ（マスターデータの編集）
+
+Character / Outfit / Background / Action を画面で編集するアプリです（Scene はビルダーで編集します）。仕様は [`spec_v2/EDITOR_SPEC.md`](spec_v2/EDITOR_SPEC.md)。
+
+```powershell
+.\.venv\Scripts\python editor.py --data data
+```
+
+<http://127.0.0.1:7863> を開きます。ポートは `--port`、なければ `config.yaml` の `editor.port`（ビルダーは `builder.port`）。
+ビルダーと同時に起動してよく、同じ `--data` を指してください。
+
+- **編集できるのは ID 以外の項目と新規追加だけ**です。ID の変更・削除・ファイル移動はしません。
+  新規作成・複製（［複製して新規作成］）では ID を作成時に入力します。
+- コメントとキー順は残したまま、変更した項目だけを書き戻します。保存前に、スキーマと意味チェックを行います（エラーがあれば保存しません。警告だけなら保存できます）。
+- **使用中の Background**（Scene が参照している背景）は、上書きせず**新しい ID の複製として保存**します。
+  **使用中の Action** はその場で上書きしますが、参照している Scene を確認欄に出します。参照中の Action では、スロットの削除・名前変更はできません（追加は可能）。
+- 右のプレビューは、**未保存の内容**でコンパイル結果を見るものです（保存ファイルには触りません）。
+- ファイルを VS Code などで外部から変更していたら、保存を止めて［再読み込み（編集を破棄）］［上書き保存］を選びます。
+- フォルダは［＋フォルダ作成］で作れます（フォルダの表示名・並び順 `_folder.yaml` も編集できます）。
+  エクスプローラー等でファイルやフォルダを移動・改名したときは、参照は id で行うので壊れませんが、**エディタとビルダーの［再読み込み］で反映**してください。
+- ビルダーでは、Scene を開いたとき、保存済みのプロンプトと今のコンパイル結果が違えば「保存時から内容が変わっています」と表示します。
 
 ## ComfyUI 連携
 
@@ -216,12 +238,15 @@ v1.x（Situation 形式）のデータは、移行ツールで v2 に変換で�
 
 - 受け入れテスト（SPEC v2 の11章）は `tests/test_acceptance.py` で、`spec_v2/samples/examples/` の出力と一致することを確認します。
   移行（11章の15）は `tests/test_migrate.py` で、旧サンプル（`spec/samples/data`）を移行して、v1.5 の出力と完全一致することを確認します。
+- エディタの受け入れテスト（EDITOR_SPEC の13章）は `tests/test_editor_acceptance.py`、ビルダー側の変更（12章）は `tests/test_ui_logic.py`、
+  画面の起動テストは `tests/test_editor_build.py` です。テストはサンプルを一時フォルダにコピーして使うので、実データには触りません。
 - ComfyUI 連携のテストは、実物ではなく、テスト内で立てる偽のサーバーとスクリプト化したイベントを相手にします。ComfyUI を起動していなくても通ります。
 
 ## 構成
 
 ```
-app.py              起動スクリプト
+app.py              ビルダーの起動スクリプト
+editor.py           エディタの起動スクリプト
 config.yaml         ComfyUI 連携の設定
 data/               実データ（characters / outfits / backgrounds / actions / scenes）
 workflow/           ComfyUI の API 形式ワークフロー
@@ -229,7 +254,8 @@ moa/
   core/             コンパイル処理（Gradio に依存しない）
   comfy/            ComfyUI 連携（設定・クライアント・生成・ノード割り当ての推定）
   migrate_v2/       v1.x からの移行ツール
-  ui/               Gradio の画面
+  ui/               ビルダーの Gradio 画面
+  editor/           エディタ（logic/ に処理、ui/ に画面）
 spec_v2/            現行の仕様書（v2.0）・JSON Schema・サンプル
 spec/               旧版（v1.5）の仕様書・サンプル（移行テストの入力として使用）
 tests/              pytest

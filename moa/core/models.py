@@ -10,6 +10,7 @@ class Issue:
     level: str  # "error" | "warning"
     message: str
     path: Path | None = None
+    field: str | None = None  # 項目のパス（例 mossItems[2].bbox、outfits.left）。エディタの一覧表示用
 
     def __str__(self) -> str:
         where = f" [{self.path.name}]" if self.path else ""

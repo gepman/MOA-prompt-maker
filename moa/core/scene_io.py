@@ -1,37 +1,16 @@
 """Sceneの保存。ruamel.yaml の round-trip で、コメントとキー順を保持して書き戻す（9.1章）。"""
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
-from ruamel.yaml.scalarstring import LiteralScalarString
 
 from .constants import ID_RE
+from .filestamp import ensure_unchanged
 from .gen import clean_gen
 from .models import CastEntry, CompileResult, Scene
-
-
-def _yaml() -> YAML:
-    y = YAML()
-    y.preserve_quotes = True
-    y.allow_unicode = True
-    y.width = 1_000_000  # 長いタグ列を折り返さない
-    y.indent(mapping=2, sequence=4, offset=2)
-    return y
-
-
-def _text(s: str):
-    return LiteralScalarString(s) if "\n" in s else s
-
-
-def _flow(values: dict) -> CommentedMap:
-    """`{ w: 1536, h: 1024 }` のように1行で書く。"""
-    m = CommentedMap(values)
-    m.fa.set_flow_style()
-    return m
+from .yaml_io import atomic_dump, flow_map as _flow, literal_text as _text, load_roundtrip
 
 
 def _gen_map(gen: dict) -> CommentedMap:
@@ -88,7 +67,8 @@ def _sync_cast(doc: CommentedMap, cast: dict[str, CastEntry]) -> None:
 
 
 def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = None,
-               generation: GenerationRecord | None = None, folder: Path | None = None) -> Path:
+               generation: GenerationRecord | None = None, folder: Path | None = None,
+               expected_stamp: tuple[int, int] | None = None) -> Path:
     """Sceneを保存し compiled にスナップショットを書き込む（7.6章）。errorがあれば保存しない。
 
     保存先：既存の Scene なら、その場所。新規なら `folder`（`scenes/` 配下。省略時は `scenes/` 直下）に `<id>.yaml`。
@@ -96,11 +76,11 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
     generation があれば seed・images・gen（実際に使った全項目）・partial を compiled に書く。
     なければ既存の値を残すが、保存済みのスナップショットと今回のプロンプト／ネガティブ適用が食い違う場合は、
     画像と内容が合わなくなるため seed・images・gen・partial をリセットする（13.4章）。
+    expected_stamp（読み込み時の更新情報）があり、保存直前のファイルと違えば ExternalChangeError（EDITOR_SPEC 12章-4）。
     """
     if not result.ok:
         raise ValueError("検証エラーがあるため保存できません")
 
-    y = _yaml()
     if path is None:
         path = repo.path_of("scene", scene.id)
     if path is None:  # 新規
@@ -116,8 +96,8 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
         doc = CommentedMap()
         doc["id"] = scene.id
     else:
-        with open(path, encoding="utf-8") as f:
-            doc = y.load(f)
+        ensure_unchanged(path, expected_stamp)
+        doc = load_roundtrip(path)
 
     if scene.name:
         doc["name"] = scene.name
@@ -172,9 +152,5 @@ def save_scene(repo, scene: Scene, result: CompileResult, path: Path | None = No
             if key in compiled:
                 del compiled[key]
 
-    tmp = path.with_name(path.name + ".tmp")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        y.dump(doc, f)
-    os.replace(tmp, path)
+    atomic_dump(doc, path)
     return path

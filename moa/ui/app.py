@@ -141,8 +141,14 @@ def build_ui(repo: Repository,
                 with gr.Row():
                     savedir_md = gr.Markdown(L.savedir_text(repo, L.new_nav()))
                     pick_save_btn = gr.Button("📁 保存先フォルダを選ぶ", size="sm")
+                with gr.Row():
+                    newdir_tb = gr.Textbox(label="新しいフォルダ名（保存先を選ぶ画面で開いているフォルダの中に作ります）", scale=3)
+                    mkdir_btn = gr.Button("＋フォルダ作成", size="sm", scale=1)
                 save_btn = gr.Button("💾 保存", variant="secondary")
                 save_msg = gr.Markdown()
+                with gr.Row(visible=False) as ext_row:   # 外部変更の検知（EDITOR_SPEC 12章-4）
+                    ext_reload_btn = gr.Button("再読み込み（編集を破棄）", size="sm")
+                    ext_over_btn = gr.Button("上書き保存", variant="stop", size="sm")
 
         NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md]
         FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
@@ -230,13 +236,21 @@ def build_ui(repo: Repository,
             cfg = comfy["cfg"]
             return effective_gen(cfg, gp_v["gen"]) if cfg is not None and cfg.samplers else None
 
-        def on_save(sc_v, nav_v, slug, display_name, gen_v, gp_v):
+        def do_save(force, sc_v, nav_v, slug, display_name, gen_v, gp_v):
             sc2, msg = L.save(repo, sc_v, nav_v, slug, display_name, gen_v, gen_params=gp_v["gen"],
-                              effective=effective_of(gp_v))
+                              effective=effective_of(gp_v), force=force)
             out = full(sc_v, sc2, nav_v)
             if msg.startswith("💾"):
                 out[SLUG_IDX] = gr.update(value="")  # 保存できたら id 欄を空に戻す
-            return out + [msg, data_issues_text()]
+            return out + [msg, data_issues_text(), gr.update(visible=msg.startswith(L.EXTERNAL_PREFIX))]
+
+        def on_ext_reload(sc_v, nav_v):
+            sc2, nav2, msg = L.reopen_scene(repo, sc_v, nav_v)
+            return full(sc_v, sc2, nav2, msg) + ["", gr.update(visible=False)]
+
+        def on_mkdir(name, nav_v):
+            msg = L.make_savedir(repo, nav_v, name)
+            return nav_out(nav_v, msg) + [gr.update(value="") if msg.startswith("📁") else gr.skip()]
 
         # ---- 生成パラメータ（スライダー）----
         def gp_view(gp_v):
@@ -364,8 +378,13 @@ def build_ui(repo: Repository,
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav], FULL + COMFY_OUT, api_name="reload").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_reload")
-        save_btn.click(on_save, [sc, nav, slug_tb, name_tb, gen, gp], FULL + [save_msg, data_issues_md],
-                       api_name="save")
+        SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row]
+        save_btn.click(partial(do_save, False), [sc, nav, slug_tb, name_tb, gen, gp], SAVE_OUT, api_name="save")
+        ext_over_btn.click(partial(do_save, True), [sc, nav, slug_tb, name_tb, gen, gp], SAVE_OUT,
+                           api_name="save_overwrite")
+        ext_reload_btn.click(on_ext_reload, [sc, nav], FULL + [save_msg, ext_row], api_name="ext_reload").then(
+            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_ext_reload")
+        mkdir_btn.click(on_mkdir, [newdir_tb, nav], NAV_OUT + [newdir_tb], api_name="mkdir")
         demo.load(on_load, [sc, nav], FULL + COMFY_OUT, api_name="init").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_init")
         for (stage, param), (sl, src, rb) in items.items():

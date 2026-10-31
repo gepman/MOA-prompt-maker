@@ -11,3 +11,5 @@ __pycache__/
 .pytest_cache/
 .gradio/
 *.yaml.tmp
+sample_copy/
+testdatav2_copy/

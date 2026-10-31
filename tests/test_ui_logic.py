@@ -489,3 +489,67 @@ def test_only_the_overridden_items_are_saved_as_scene_gen(repo, data_dir):
     assert saved(data_dir, "g1")["gen"] == {"moss": {"steps": 20}, "anima": {"denoise": 0.45}}
     L.save(repo, sc, nav, "g2", "", None, gen_params={})
     assert "gen" not in saved(data_dir, "g2")
+
+
+# ---- エディタ導入に伴う変更（EDITOR_SPEC 12章 / 13章-14）----
+def _bump(path):
+    import os
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+
+
+def test_opening_a_scene_notes_that_master_data_changed(repo, data_dir):
+    sc, nav, msg = open_scene(repo)
+    assert "保存時から内容が変わっています" not in msg                 # compiled が無い Scene では表示しない
+    sc, msg = L.save(repo, sc, nav, "beach_chat__trio", "", None)
+    assert "上書き保存" in msg
+    repo.reload()
+    assert "保存時から内容が変わっています" not in open_scene(repo)[2]
+
+    edit(data_dir / "actions" / "beach_chat.yaml", "Three adult women", "Three young adult women")   # 行為を編集
+    repo.reload()
+    note = open_scene(repo)[2]
+    assert "保存時から内容が変わっています" in note and "MOSS" in note and "Anima" not in note
+
+    edit(data_dir / "characters" / "skyla_bw.yaml", "red hair", "blue hair")                         # Anima 側も
+    repo.reload()
+    note = open_scene(repo)[2]
+    assert "MOSS" in note and "Anima" in note
+
+
+def test_a_new_scene_does_not_get_gen_written(repo, data_dir):
+    sc, nav, _ = new_draft(repo, "beach_solo")
+    sc, nav = fill_cast(repo, sc, nav, {"solo": "skyla_bw"})
+    L.save(repo, sc, nav, "beach_solo__nogen", "", None)
+    assert "gen" not in load_yaml(data_dir / "scenes" / "beach_solo__nogen.yaml")        # 動かした項目だけ書く
+
+
+def test_save_dir_folder_creation_uses_the_shared_name_rules(repo, data_dir):
+    nav = L.new_nav()
+    assert L.make_savedir(repo, nav, "新規").startswith("⚠")                              # 保存先を選ぶ画面を開いていない
+    nav = L.set_target(nav, "savedir")
+    for bad in ("CON", "con.txt", "_x", ".x", "a?b", "末尾.", ""):
+        assert L.make_savedir(repo, nav, bad).startswith("⚠"), bad
+    assert L.make_savedir(repo, nav, "ポケモン").startswith("📁")
+    assert (data_dir / "scenes" / "ポケモン").is_dir()
+    assert L.make_savedir(repo, nav, "ポケモン").startswith("⚠")                          # 同名は不可
+
+
+def test_scene_save_detects_external_change_and_offers_two_choices(repo, data_dir):
+    path = data_dir / "scenes" / "beach_chat__trio.yaml"
+    sc, nav, _ = open_scene(repo)
+    path.write_text(path.read_text(encoding="utf-8") + "# 外部で追記\n", encoding="utf-8")
+    _bump(path)
+
+    sc2, msg = L.save(repo, sc, nav, "beach_chat__trio", "外部変更の後", None)
+    assert msg.startswith(L.EXTERNAL_PREFIX)
+    assert "外部変更の後" not in path.read_text(encoding="utf-8")                          # 止まった
+
+    sc3, msg = L.save(repo, sc, nav, "beach_chat__trio", "外部変更の後", None, force=True)   # [上書き保存]
+    assert "上書き保存しました" in msg and load_yaml(path)["name"] == "外部変更の後"
+
+    path.write_text(path.read_text(encoding="utf-8") + "# もう一度\n", encoding="utf-8")
+    _bump(path)
+    assert L.save(repo, sc3, nav, "beach_chat__trio", "", None)[1].startswith(L.EXTERNAL_PREFIX)
+    sc4, nav4, msg = L.reopen_scene(repo, sc3, nav)                                       # [再読み込み（編集を破棄）]
+    assert "開きました" in msg and "上書き保存しました" in L.save(repo, sc4, nav4, "beach_chat__trio", "", None)[1]

@@ -8,6 +8,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from ruamel.yaml import YAML
 
+from .filestamp import stamp as file_stamp
 from .constants import ROOTS, SCHEMA_DIR
 from .models import Action, Background, Character, FolderMeta, Issue, Outfit, Scene
 from .validate import validate_repo
@@ -30,6 +31,7 @@ class Entry:
     path: Path
     obj: object
     raw: dict  # 読み込み時のYAML内容（アップロード照合用）
+    stamp: tuple[int, int] | None = None  # 読み込み時の更新情報（外部変更の検知用）
 
 
 def load_yaml(path: Path) -> object:
@@ -76,9 +78,11 @@ class Repository:
                     self._load_file(kind, path)
         self.issues += validate_repo(self)
 
-    def _schema_errors(self, kind: str, data: dict) -> list[str]:
+    def schema_errors(self, kind: str, data: dict) -> list[str]:
         errs = sorted(self._validators[kind].iter_errors(data), key=lambda e: list(map(str, e.absolute_path)))
         return [f"{'.'.join(map(str, e.absolute_path)) or '(root)'}: {e.message}" for e in errs]
+
+    _schema_errors = schema_errors  # 旧名
 
     def _load_file(self, kind: str, path: Path) -> None:
         try:
@@ -91,14 +95,14 @@ class Repository:
             return
 
         if path.name == "_folder.yaml":
-            errs = self._schema_errors("folder", data)
+            errs = self.schema_errors("folder", data)
             if errs:
                 self.issues += [Issue("error", f"スキーマ違反 {m}", path) for m in errs]
             else:
                 self.folder_meta[path.parent] = FolderMeta.from_dict(data)
             return
 
-        errs = self._schema_errors(kind, data)
+        errs = self.schema_errors(kind, data)
         if errs:
             self.issues += [Issue("error", f"スキーマ違反 {m}", path) for m in errs]
             return
@@ -112,7 +116,7 @@ class Repository:
             self.issues.append(Issue("error", f"id '{eid}' が重複しています（{other.name}）", path))
             return
 
-        entry = Entry(kind, eid, path, _BUILDERS[kind](data), data)
+        entry = Entry(kind, eid, path, _BUILDERS[kind](data), data, file_stamp(path))
         self.entries[kind][eid] = entry
         self.by_path[path] = entry
 

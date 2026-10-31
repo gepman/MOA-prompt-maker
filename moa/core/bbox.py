@@ -15,18 +15,19 @@ def _num(v: float) -> str:
     return f"{v:g}"
 
 
-def check_inversion(items: list[MossItem], where: str, path: Path | None = None) -> list[Issue]:
+def check_inversion(items: list[MossItem], where: str, path: Path | None = None, kind: str = "mossItems") -> list[Issue]:
     """`y_min > y_max` または `x_min > x_max` はエラー（キャンバスに依存しない）。"""
     issues = []
     for i, it in enumerate(items, 1):
         y0, x0, y1, x1 = it.bbox
         if y0 > y1 or x0 > x1:
             issues.append(Issue("error", f"{where} の {i}番目の item（label: {it.label}）の bbox の大小が逆転しています"
-                                         f"（[{y0}, {x0}, {y1}, {x1}]）", path))
+                                         f"（[{y0}, {x0}, {y1}, {x1}]）", path, f"{kind}[{i}].bbox"))
     return issues
 
 
-def check_overflow(items: list[MossItem], canvas: dict, where: str, path: Path | None = None) -> list[Issue]:
+def check_overflow(items: list[MossItem], canvas: dict, where: str, path: Path | None = None,
+                   kind: str = "mossItems") -> list[Issue]:
     """キャンバスからのはみ出しを警告にする。完全にはみ出し（重ならない）ものは文言で区別する。"""
     w, h = canvas["w"], canvas["h"]
     half_w, half_h = w / 2, h / 2
@@ -49,5 +50,5 @@ def check_overflow(items: list[MossItem], canvas: dict, where: str, path: Path |
         outside = x1 < -half_w or x0 > half_w or y1 < -half_h or y0 > half_h
         kind = "キャンバスと重ならない位置にあります（完全にはみ出し）" if outside else "キャンバスからはみ出しています"
         issues.append(Issue("warning", f"{where} の {i}番目の item（label: {it.label}）が{kind}："
-                                       f"{', '.join(sides)}（キャンバス {w}×{h}）", path))
+                                       f"{', '.join(sides)}（キャンバス {w}×{h}）", path, f"{kind}[{i}].bbox"))
     return issues

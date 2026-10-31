@@ -1,3 +1,9 @@
+# 画面のポート（起動オプション --port が優先）。7861 / 7862 は Forge Neo が使うので使わない
+builder:
+  port: 7860                          # app.py（ビルダー）
+editor:
+  port: 7863                          # editor.py（エディタ）
+
 # ComfyUI 連携の設定。
 # ノードIDの候補は次のコマンドでワークフローから推定できる:
 #   .venv\Scripts\python -m moa.comfy.suggest workflow/<ワークフロー>.json

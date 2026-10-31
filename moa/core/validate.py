@@ -33,7 +33,7 @@ def action_templates(action: Action) -> list[tuple[str, str]]:
 
 def _template_tag_warnings(who: str, label: str, text: str, path) -> list[Issue]:
     _, removed = strip_template_count_tags(text)
-    return [Issue("warning", f"{who} の {label} に人数タグ/solo '{tag}' があります（コンパイル時に除去します）", path)
+    return [Issue("warning", f"{who} の {label} に人数タグ/solo '{tag}' があります（コンパイル時に除去します）", path, label)
             for tag in removed]
 
 
@@ -42,7 +42,7 @@ def validate_character(repo: "Repository", char: Character) -> list[Issue]:
     path = repo.path_of("character", char.id)
     d = char.default_outfit
     if d and d != NONE and repo.outfit(d) is None:
-        return [Issue("error", f"defaultOutfit '{d}' が存在しません", path)]
+        return [Issue("error", f"defaultOutfit '{d}' が存在しません", path, "defaultOutfit")]
     return []
 
 
@@ -58,9 +58,9 @@ def validate_background(repo: "Repository", bg: Background) -> list[Issue]:
         found, malformed = scan_placeholders(text)
         for slot, suffix in found:
             ph = "{{" + slot + (f".{suffix}" if suffix else "") + "}}"
-            issues.append(Issue("error", f"{who} の {label} にプレイスホルダー {ph} があります（Background では使えません）", path))
+            issues.append(Issue("error", f"{who} の {label} にプレイスホルダー {ph} があります（Background では使えません）", path, label))
         for bad in malformed:
-            issues.append(Issue("error", f"{who} の {label} にプレイスホルダー {bad} があります（Background では使えません）", path))
+            issues.append(Issue("error", f"{who} の {label} にプレイスホルダー {bad} があります（Background では使えません）", path, label))
     issues += _template_tag_warnings(who, "anima", bg.anima, path)
     issues += check_inversion(bg.moss_items, who, path)
     issues += check_overflow(bg.moss_items, bg.canvas, who, path)  # Background の items は自分の canvas で判定する
@@ -76,24 +76,24 @@ def validate_action(repo: "Repository", action: Action) -> list[Issue]:
     for label, text in action_templates(action):
         found, malformed = scan_placeholders(text)
         for bad in malformed:
-            issues.append(Issue("error", f"{who} の {label} に不正なプレイスホルダー {bad} があります", path))
+            issues.append(Issue("error", f"{who} の {label} に不正なプレイスホルダー {bad} があります", path, label))
         for slot, _ in found:
             used.add(slot)
             if slot not in action.slots:
-                issues.append(Issue("error", f"{who} の {label} で宣言されていないスロット '{slot}' が使われています", path))
+                issues.append(Issue("error", f"{who} の {label} で宣言されていないスロット '{slot}' が使われています", path, label))
     for slot in action.slots:
         if slot not in used:
             issues.append(Issue("warning", f"{who} のスロット '{slot}' は宣言されていますが、"
-                                           "mossCaption / mossItems / anima のどこにも使われていません", path))
+                                           "mossCaption / mossItems / anima のどこにも使われていません", path, "slots"))
 
     for slot, value in action.outfits.items():
         if slot not in action.slots:
-            issues.append(Issue("error", f"{who} の outfits に宣言されていないスロット '{slot}' があります", path))
+            issues.append(Issue("error", f"{who} の outfits に宣言されていないスロット '{slot}' があります", path, f"outfits.{slot}"))
         if value != NONE and repo.outfit(value) is None:
-            issues.append(Issue("error", f"{who} の outfits[{slot}] の服装 '{value}' が存在しません", path))
+            issues.append(Issue("error", f"{who} の outfits[{slot}] の服装 '{value}' が存在しません", path, f"outfits.{slot}"))
 
     if action.background and repo.background(action.background) is None:
-        issues.append(Issue("warning", f"{who} の推奨背景 '{action.background}' が存在しません", path))
+        issues.append(Issue("warning", f"{who} の推奨背景 '{action.background}' が存在しません", path, "background"))
 
     issues += _template_tag_warnings(who, "anima", action.anima, path)
     issues += check_inversion(action.moss_items, who, path)
