@@ -112,7 +112,7 @@ def field_diff_html(qe: dict) -> dict[str, str]:
     r = qe["result"]
     if r is None or not r.ok:
         return {f: "" for f in FIELDS}
-    return {f: rows_to_html(field_rows(r, f, qe["edits"].get(f))) for f in FIELDS}
+    return {f: rows_to_html(field_rows(r, f, qe["edits"].get(f)), f) for f in FIELDS}
 
 
 # ---- 生成 ----

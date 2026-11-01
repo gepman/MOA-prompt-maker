@@ -19,7 +19,7 @@ from moa.core.models import Issue
 from moa.ui import logic as L
 from moa.ui import quickedit as Q
 from moa.ui.dialogs import pick_folder
-from moa.ui.style import DEFAULT_PROMPT_FONT_PX, prompt_css
+from moa.ui.style import DEFAULT_PROMPT_FONT_PX, JUMP_JS, TEXTBOX_ID, prompt_css
 
 
 def build_ui(repo: Repository,
@@ -46,7 +46,8 @@ def build_ui(repo: Repository,
             lo, hi, step = 0.0, 1.0, 0.05
         return {"minimum": lo, "maximum": hi, "step": step, "value": wf if wf is not None else lo}
 
-    with gr.Blocks(title="MOSS/Anima プロンプトビルダー", css=prompt_css(prompt_font_px)) as demo:
+    with gr.Blocks(title="MOSS/Anima プロンプトビルダー", css=prompt_css(prompt_font_px),
+                   head=f"<script>{JUMP_JS}</script>") as demo:
         sc = gr.State(L.new_sc())
         nav = gr.State(L.new_nav())
         gen = gr.State(None)  # 直近の生成結果のスナップショット（保存ボタンで Scene に記録する。再試行にも使う）
@@ -102,13 +103,13 @@ def build_ui(repo: Repository,
                 gr.Markdown("_下の4つの欄は直接編集できます（クイック編集）。編集は生成にだけ使われ、保存されません。"
                             "フォーカスを外すか［差分を更新］で反映します。_")
                 moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=True,
-                                     elem_classes=["moa-prompt"])
+                                     elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("moss"))
                 moss_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                 with gr.Row():
                     moss_st = gr.Markdown()
                     moss_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False, scale=0, min_width=200)
                 anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=True,
-                                      elem_classes=["moa-prompt"])
+                                      elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("anima"))
                 anima_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                 with gr.Row():
                     anima_st = gr.Markdown()
@@ -116,13 +117,13 @@ def build_ui(repo: Repository,
                 with gr.Row():
                     with gr.Column():
                         negm_tb = gr.Textbox(label="ネガティブ（MOSS用）", lines=3, show_copy_button=True, interactive=True,
-                                             elem_classes=["moa-prompt"])
+                                             elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("negm"))
                         negm_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                         negm_st = gr.Markdown()
                         negm_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
                     with gr.Column():
                         nega_tb = gr.Textbox(label="ネガティブ（Anima用）", lines=3, show_copy_button=True, interactive=True,
-                                             elem_classes=["moa-prompt"])
+                                             elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("nega"))
                         nega_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                         nega_st = gr.Markdown()
                         nega_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
