@@ -15,12 +15,20 @@ def config_port(config_path: Path | str, section: str, default: int) -> int:
     return port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else default
 
 
-def config_prompt_font_size(config_path: Path | str, default: int = 16) -> int | float:
-    """builder.promptFontSize（px）。8〜48 の数値だけ受け付け、それ以外・読めないときは既定。"""
+def _valid_font_size(size) -> bool:
+    return isinstance(size, (int, float)) and not isinstance(size, bool) and 8 <= size <= 48
+
+
+def config_prompt_font_size(config_path: Path | str, default: int = 16, section: str | None = None) -> int | float:
+    """プロンプト欄の文字サイズ（px）。`section`（例 "editor"）の promptFontSize があればそれ、なければ builder の値、なければ既定。
+    8〜48 の数値だけ受け付け、それ以外（数値でない・範囲外）は無効として次を見る。読めないときは既定。"""
     try:
-        data = YAML(typ="safe").load(Path(config_path).read_text(encoding="utf-8"))
-        size = (data or {}).get("builder", {}).get("promptFontSize")
+        data = YAML(typ="safe").load(Path(config_path).read_text(encoding="utf-8")) or {}
     except Exception:
         return default
-    ok = isinstance(size, (int, float)) and not isinstance(size, bool) and 8 <= size <= 48
-    return size if ok else default
+    for name in ([section] if section else []) + ["builder"]:
+        block = data.get(name)
+        size = block.get("promptFontSize") if isinstance(block, dict) else None
+        if _valid_font_size(size):
+            return size
+    return default

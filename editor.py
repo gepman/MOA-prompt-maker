@@ -2,12 +2,13 @@
 
 マスターデータ（Character / Outfit / Background / Action）の編集アプリ。ビルダー（app.py）と同時に起動してよい。
 ポートは 起動オプション > config.yaml の editor.port > 7863。
+文字サイズは config.yaml の editor.promptFontSize > builder.promptFontSize > 16。
 """
 import argparse
 from pathlib import Path
 
 from moa.core import Repository
-from moa.core.appconfig import config_port
+from moa.core.appconfig import config_port, config_prompt_font_size
 from moa.editor.ui.app import build_editor
 
 
@@ -25,7 +26,8 @@ def main() -> None:
     repo = Repository(root)
     print(f"データ: {repo.root}  エラー {sum(i.level == 'error' for i in repo.issues)} 件")
     port = args.port if args.port is not None else config_port(args.config, "editor", 7863)
-    build_editor(repo).launch(server_name=args.host, server_port=port)
+    font_px = config_prompt_font_size(args.config, section="editor")   # editor.promptFontSize ＞ builder.promptFontSize ＞ 16
+    build_editor(repo, prompt_font_px=font_px).launch(server_name=args.host, server_port=port)
 
 
 if __name__ == "__main__":

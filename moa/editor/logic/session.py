@@ -6,7 +6,8 @@
   mode    … None / "edit" / "new" / "copy" / "folder"
   kind    … 編集中のエンティティの種別（folder のときは None）
   id, path, stamp … 編集中のファイル（edit）。stamp は読み込み時の更新情報
-  loaded  … 読み込み時のフォーム値（未保存の変更の判定に使う）
+  loaded  … 読み込み時のフォーム値（未保存の変更の判定と、差分表示の基準に使う）
+  base    … 差分表示の基準を loaded と分けたいときだけ持つ（複製：複製元の保存済みの内容。14章）。None なら loaded
   save_dir … 新規・複製の保存先フォルダ（data からの相対パス）
   folder  … folder モードで編集中のフォルダ（相対パス）
   pending … 未保存の変更があって止めた移動 {"action": ..., ...}
@@ -71,7 +72,7 @@ def is_dirty(st: dict, values: dict | None) -> bool:
 def _opened(st: dict, **kw) -> dict:
     st = copy.deepcopy(st)
     st.update({"mode": None, "kind": None, "id": None, "path": None, "stamp": None, "loaded": None,
-               "folder": None, "pending": None})
+               "base": None, "folder": None, "pending": None})
     st.update(kw)
     return st
 
@@ -99,7 +100,10 @@ def start_copy(repo: Repository, st: dict, values: dict) -> dict:
     if st["mode"] != "edit":
         return st
     src = (repo.root / st["path"]).parent
-    return _opened(st, mode="copy", kind=st["kind"], loaded=forms.copy_values(values), save_dir=repo.rel(src))
+    entry = repo.entry(st["kind"], st["id"])   # 差分の基準は複製元の保存済みの内容（未保存の編集は基準に入れない）
+    base = forms.copy_values(forms.values_of(entry.obj)) if entry else None
+    return _opened(st, mode="copy", kind=st["kind"], loaded=forms.copy_values(values), base=base,
+                   save_dir=repo.rel(src))
 
 
 # ---- 未保存の変更があるときは止める ----

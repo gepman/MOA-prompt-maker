@@ -13,6 +13,7 @@ import gradio as gr
 from moa.core.models import Issue
 from moa.core.repository import Repository
 from moa.editor.logic import cards as C
+from moa.editor.logic import diffs as D
 from moa.editor.logic import forms, session, tree
 from moa.editor.logic import picker as PK
 from moa.editor.logic.bboxdraw import draw_bboxes
@@ -21,6 +22,7 @@ from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
                                    save_draft, save_folder)
 from moa.editor.logic.validation import validate_draft
+from moa.ui.style import DEFAULT_PROMPT_FONT_PX, prompt_css
 
 MAX_SLOTS = 8
 TRI_CHOICES = [("未指定（キーを書かない）", "unset"), ("none（着せない）", "none"), ("Outfit を選ぶ", "outfit")]
@@ -35,7 +37,7 @@ def issue_lines(issues: list[Issue]) -> str:
                      for i in issues)
 
 
-def build_editor(repo: Repository) -> gr.Blocks:
+def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_FONT_PX) -> gr.Blocks:
     c: dict = {}   # 名前 → 部品
 
     def R(name, comp):
@@ -49,7 +51,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
             R(f"{name}_show", gr.Markdown(f"選択中：{empty}"))
             R(f"{name}_btn", gr.Button("選ぶ", size="sm", scale=0, min_width=72, variant="primary"))
 
-    with gr.Blocks(title="MOA エディタ") as demo:
+    with gr.Blocks(title="MOA エディタ", css=prompt_css(prompt_font_px)) as demo:
         st = R("st", gr.State(session.new_state()))
         cards_n = R("cards_n", gr.State(0))
 
@@ -123,10 +125,12 @@ def build_editor(repo: Repository) -> gr.Blocks:
                             R("ex_o", gr.Number(label="others", precision=0, value=0, minimum=0))
 
                     with gr.Group(visible=False) as moss_blk:
-                        R("moss", gr.Textbox(label="moss", lines=6))
+                        R("moss", gr.Textbox(label="moss", lines=6, elem_classes=["moa-prompt"]))
+                        R("df_moss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                     with gr.Group(visible=False) as cap_blk:
-                        R("mossCaption", gr.Textbox(label="mossCaption", lines=4))
+                        R("mossCaption", gr.Textbox(label="mossCaption", lines=4, elem_classes=["moa-prompt"]))
+                        R("df_mossCaption", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                     with gr.Group(visible=False) as cards_blk:
                         gr.Markdown("**mossItems**（label・caption・bbox `[y_min, x_min, y_max, x_max]`）")
@@ -140,7 +144,8 @@ def build_editor(repo: Repository) -> gr.Blocks:
                                     R(f"c_down{i}", gr.Button("↓", size="sm", scale=0, min_width=40))
                                     R(f"c_del{i}", gr.Button("削除", size="sm", scale=0, min_width=60))
                                     R(f"c_full{i}", gr.Button("全面", size="sm", scale=0, min_width=60))
-                                R(f"c_caption{i}", gr.Textbox(label="caption", lines=2))
+                                R(f"c_caption{i}", gr.Textbox(label="caption", lines=2, elem_classes=["moa-prompt"]))
+                                R(f"c_df{i}", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                                 with gr.Row():
                                     for k, lab in zip(("y0", "x0", "y1", "x1"), ("y_min", "x_min", "y_max", "x_max")):
                                         R(f"c_{k}{i}", gr.Number(label=lab, precision=0, value=0))
@@ -150,13 +155,18 @@ def build_editor(repo: Repository) -> gr.Blocks:
                         R("bbox_img", gr.Image(label="bbox プレビュー図（表示専用）", type="pil", interactive=False))
 
                     with gr.Group(visible=False) as anima_blk:
-                        R("anima", gr.Textbox(label="anima", lines=4))
+                        R("anima", gr.Textbox(label="anima", lines=4, elem_classes=["moa-prompt"]))
+                        R("df_anima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                     with gr.Group(visible=False) as hair_blk:
-                        R("bodyHairMoss", gr.Textbox(label="bodyHairMoss", lines=2))
-                        R("bodyHairAnima", gr.Textbox(label="bodyHairAnima", lines=2))
+                        R("bodyHairMoss", gr.Textbox(label="bodyHairMoss", lines=2, elem_classes=["moa-prompt"]))
+                        R("df_bodyHairMoss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
+                        R("bodyHairAnima", gr.Textbox(label="bodyHairAnima", lines=2, elem_classes=["moa-prompt"]))
+                        R("df_bodyHairAnima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                     with gr.Group(visible=False) as neg_blk:
-                        R("negativeMoss", gr.Textbox(label="negativeMoss", lines=2))
-                        R("negativeAnima", gr.Textbox(label="negativeAnima", lines=2))
+                        R("negativeMoss", gr.Textbox(label="negativeMoss", lines=2, elem_classes=["moa-prompt"]))
+                        R("df_negativeMoss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
+                        R("negativeAnima", gr.Textbox(label="negativeAnima", lines=2, elem_classes=["moa-prompt"]))
+                        R("df_negativeAnima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                 with gr.Group(visible=False) as folder_box:
                     gr.Markdown("**フォルダの設定（`_folder.yaml`）**。ファイルが無ければ保存時に新しく作ります。")
@@ -164,14 +174,17 @@ def build_editor(repo: Repository) -> gr.Blocks:
                     R("f_desc", gr.Textbox(label="description"))
                     R("f_order", gr.Textbox(label="order（1行に1つ、ファイル名またはフォルダ名）", lines=4))
 
+                R("chg_html", gr.HTML(visible=False, elem_classes=["moa-prompt"]))   # 保存前の変更点（14.4）
                 with gr.Row(visible=False) as buttons_row:
                     save_btn = gr.Button("💾 保存", variant="primary")
                     R("copy_btn", gr.Button("複製して新規作成"))
                     check_btn = gr.Button("検証だけする")
+                    diff_btn = gr.Button("差分を更新")
 
                 with gr.Group(visible=False) as conf_box:
                     R("conf_md", gr.Markdown())
                     R("conf_scenes", gr.Markdown())
+                    R("conf_diff", gr.HTML(elem_classes=["moa-prompt"]))   # 保存前の変更点を併記（14.4）
                     R("cow_id", gr.Textbox(label="新しい ID（複製の ID）", visible=False))
                     with gr.Row():
                         R("conf_ok", gr.Button("保存", variant="primary"))
@@ -378,6 +391,29 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 return f"**フォルダの設定**：`{st_v['folder']}/_folder.yaml`"
             return "_左の一覧から項目を選ぶか、［＋新規作成］を押してください。_"
 
+        def diff_clear() -> dict:
+            """差分表示をすべて隠す（開く・保存・再読み込みで基準が変わったとき、編集中でないとき）。"""
+            out = {c["chg_html"]: gr.update(value="", visible=False)}
+            for k in D.LONG_KEYS:
+                out[c[f"df_{k}"]] = gr.update(value="", visible=False)
+            for i in range(MAX_ITEMS):
+                out[c[f"c_df{i}"]] = gr.update(value="", visible=False)
+            return out
+
+        def diff_values(st_v: dict, v: dict | None) -> dict:
+            """色付きの差分（欄ごと・カードごと・保存前の変更点）。基準は「読み込んだときの内容」（14.2）。変更がなければ隠す。"""
+            out = diff_clear()
+            base = D.baseline(st_v)
+            if st_v["mode"] not in ("edit", "new", "copy") or v is None or base is None:
+                return out
+            view = D.views(st_v["kind"], v, base)
+            for k, html in view["fields"].items():
+                out[c[f"df_{k}"]] = gr.update(value=html, visible=bool(html))
+            for i, html in enumerate(view["cards"][:MAX_ITEMS]):
+                out[c[f"c_df{i}"]] = gr.update(value=html, visible=bool(html))
+            out[c["chg_html"]] = gr.update(value=view["changes"], visible=bool(view["changes"]))
+            return out
+
         def hide_boxes() -> dict:
             return {boxes["conf"]: gr.update(visible=False), boxes["ext"]: gr.update(visible=False),
                     c["pending_box"]: gr.update(visible=False)}
@@ -401,7 +437,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
             """状態 → 画面全体（ツリー・フォーム・プレビューの選択欄）。"""
             out = {c["st"]: st_v, c["head"]: head_text(st_v), c["issues"]: "", c["save_msg"]: msg or "",
                    c["nav_msg"]: ""}
-            out |= tree_part(st_v) | visibility(st_v) | hide_boxes() | pv_part(st_v)
+            out |= tree_part(st_v) | visibility(st_v) | hide_boxes() | pv_part(st_v) | diff_clear() | {c["conf_diff"]: ""}
             out[c["pk_bar"]] = gr.update(open=False)   # ピッカーは閉じる（前回のフォルダは pk に残す）
             mode, kind = st_v["mode"], st_v["kind"]
             v = st_v["loaded"]
@@ -545,6 +581,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 out[c["status"]] = status_text(st_v, v)
                 if t == "act_bg" and v is not None:
                     out[c["bbox_img"]] = own_image(st_v["kind"], v)
+                out |= diff_values(st_v, v)
             return out
 
         def on_pk_pick(entity_id, pk_v, st_v, n, *args):
@@ -559,6 +596,10 @@ def build_editor(repo: Repository) -> gr.Blocks:
         def on_dirty(st_v, n, *args):
             v = current(st_v, n, args)
             return {c["status"]: status_text(st_v, v)}
+
+        def on_diff(st_v, n, *args):
+            """欄のフォーカスが外れたとき・［差分を更新］：今のフォームの値を基準と比べて、差分表示を作り直す（キー入力ごとには動かさない）。"""
+            return diff_values(st_v, current(st_v, n, args))
 
         def on_slots(st_v, n, *args):
             a = dict(zip(FORM_NAMES, args))
@@ -591,6 +632,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 out[c["bbox_img"]] = own_image(kind, v)
                 out[c["issues"]] = issue_lines(validate_draft(repo, kind, v, new=st_v["mode"] != "edit",
                                                               original_id=st_v["id"]))
+                out |= diff_values(st_v, v)
             return out
 
         # 検証・保存
@@ -618,7 +660,10 @@ def build_editor(repo: Repository) -> gr.Blocks:
             if res.status == ERRORS:
                 return out | {c["save_msg"]: f"❌ {res.message}", c["issues"]: issue_lines(res.issues)}
             scenes = "\n".join(f"- {name}（`{sid}`）" for name, sid in res.scenes)
+            base = D.baseline(st_v)
+            changes = D.changes_html(st_v["kind"], v, base) if base is not None else ""
             out |= {boxes["conf"]: gr.update(visible=True), c["conf_scenes"]: "参照している Scene：\n" + scenes,
+                    c["conf_diff"]: ("<b>保存前の変更点</b>" + changes) if changes else "",
                     c["issues"]: issue_lines(res.issues)}
             if res.status in (CONFIRM_COW, COW_ID_ERROR):
                 warn = f"\n\n❌ {res.message}" if res.status == COW_ID_ERROR else ""
@@ -709,6 +754,12 @@ def build_editor(repo: Repository) -> gr.Blocks:
         c["slots"].input(on_slots, ST_FORM, OUT, api_name="slots")
         dirty_triggers = [comp.input for n, comp in zip(FORM_NAMES, FORM) if n != "slots" and n not in STATE_FORM]
         gr.on(dirty_triggers, on_dirty, ST_FORM, OUT)
+
+        diff_btn.click(on_diff, ST_FORM, OUT, api_name="diff")
+        for n_, comp in zip(FORM_NAMES, FORM):   # 差分の更新：フォーカスが外れたとき（ラジオは選んだとき）だけ。キー入力ごとには動かさない
+            if n_ in STATE_FORM:
+                continue
+            (comp.input if isinstance(comp, gr.Radio) else comp.blur)(on_diff, ST_FORM, OUT, api_name=f"diff_{n_}")
 
         c["add_btn"].click(partial(card_op, "add", 0), ST_FORM, OUT, api_name="card_add")
         for i in range(MAX_ITEMS):

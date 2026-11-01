@@ -43,7 +43,7 @@ def _after_save(repo: Repository, st: dict, kind: str, values: dict, path: Path)
     repo.reload()
     st = copy.deepcopy(st)
     st.update(mode="edit", kind=kind, id=values["id"], path=repo.rel(path),
-              stamp=list(stamp(path) or ()) or None, loaded=forms.normalize(kind, values),
+              stamp=list(stamp(path) or ()) or None, loaded=forms.normalize(kind, values), base=None,
               cwd=repo.rel(path.parent), pending=None)
     return st
 
