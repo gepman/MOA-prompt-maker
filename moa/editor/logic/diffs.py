@@ -11,10 +11,11 @@ import json
 from dataclasses import replace
 
 from moa.core.constants import NONE
-from moa.core.diffcore import Row, similar, tag_lines, word_diff
+from moa.core.diffcore import Row, similar, tag_lines, tag_spans, word_diff
 from moa.core.entity_io import ORDER
 from moa.core.textutil import split_tags
 from moa.ui.diffhtml import rows_to_html
+from moa.ui.style import TEXTBOX_ID  # noqa: F401  （編集欄の elem_id の書式。移動先の名前はこれに合わせる）
 
 from . import forms
 
@@ -24,6 +25,17 @@ LONG_KEYS = ("moss", "anima", "mossCaption", "bodyHairMoss", "bodyHairAnima", "n
 LIST_KEYS = ("tags", "metaTags", "slots")             # 要素単位
 EMPTY = "（なし）"
 INDENT = "  "
+SINGLE_KEYS = ("name", "group")                       # 1行の欄（変更点の行から、その欄へ移動できる）
+JUMP_LIST_KEYS = ("tags", "metaTags", "slots")
+
+
+def _lead(text) -> int:
+    """編集欄の文字列の先頭にある空白の数（差分は前後の空白を除いた値で比べるので、位置をこの分ずらす）。"""
+    return len(text) - len(text.lstrip()) if isinstance(text, str) else 0
+
+
+def _with_target(rows: list[Row], target: str | None) -> list[Row]:
+    return [replace(r, target=target) for r in rows] if target else rows
 
 
 def _nested(rows: list[Row]) -> list[Row]:
@@ -37,17 +49,26 @@ def baseline(st: dict) -> dict | None:
 
 
 # ---- 長い文章・タグの欄 ----
-def text_rows(key: str, old: str, new: str) -> list[Row]:
-    """1つの欄の差分の行（見出しなし）。anima / negativeAnima はタグ単位、ほかは単語単位。変更がなければ空。"""
+def _inline(old: str, new: str, target: str | None, offset: int, indent: str = "") -> Row:
+    """単語単位の差分の1行。target があれば、変更箇所（追加は最後尾、削除は消えた箇所）へ移動できる。"""
+    segs, _, dec = word_diff(old, new, None, ())
+    seg_pos = [None if p is None else p + offset for p in dec] if target else []
+    return Row("inline", segs=segs, indent=indent, seg_pos=seg_pos, target=target,
+               pos=next((p for p in seg_pos if p is not None), None))
+
+
+def text_rows(key: str, old: str, new: str, target: str | None = None, offset: int = 0) -> list[Row]:
+    """1つの欄の差分の行（見出しなし）。anima / negativeAnima はタグ単位、ほかは単語単位。変更がなければ空。
+    target＝移動先の欄の名前、offset＝その欄の文字列の先頭の空白の数（位置のずれ）。省略すると移動はできない。"""
     old, new = old or "", new or ""
     if old == new:
         return []
     if key in TAG_KEYS:
-        rows = tag_lines(split_tags(old), split_tags(new), [], None, None)
+        ends = [e + offset for _, e in tag_spans(new)] if target else None
+        rows = tag_lines(split_tags(old), split_tags(new), [], ends, offset if target else None)
         if rows:
-            return rows
-    segs, _, _ = word_diff(old, new, None, ())   # 単語単位。タグが同じで空白・改行だけが違うときもここに来る
-    return [Row("inline", segs=segs)]
+            return _with_target(rows, target)
+    return [_inline(old, new, target, offset)]   # 単語単位。タグが同じで空白・改行だけが違うときもここに来る
 
 
 # ---- mossItems のカード ----
@@ -59,14 +80,13 @@ def _item_key(item: dict) -> str:
     return json.dumps(item, ensure_ascii=False, sort_keys=True)
 
 
-def card_rows(old: dict, new: dict) -> list[Row]:
-    """カード1枚の差分：caption の単語差分、label・bbox の 旧→新（変わったものだけ）。"""
+def card_rows(old: dict, new: dict, target: str | None = None, offset: int = 0) -> list[Row]:
+    """カード1枚の差分：caption の単語差分、label・bbox の 旧→新（変わったものだけ）。target＝caption 欄の名前（移動先）。"""
     rows: list[Row] = []
     if old["label"] != new["label"]:
         rows += [Row("head", "label"), Row("pair", old["label"] or EMPTY, new["label"] or EMPTY, indent=INDENT)]
     if old["caption"] != new["caption"]:
-        segs, _, _ = word_diff(old["caption"], new["caption"], None, ())
-        rows += [Row("head", "caption"), Row("inline", segs=segs, indent=INDENT)]
+        rows += [Row("head", "caption"), _inline(old["caption"], new["caption"], target, offset, INDENT)]
     if list(old["bbox"]) != list(new["bbox"]):
         rows += [Row("head", "bbox"), Row("pair", _bbox(old["bbox"]), _bbox(new["bbox"]), indent=INDENT)]
     return rows
@@ -102,15 +122,24 @@ def match_items(old: list[dict], new: list[dict]) -> list[int | None]:
     return match
 
 
-def card_views(old: list[dict], new: list[dict]) -> list[list[Row]]:
-    """新しい各カードの下に出す差分（変更がなければ空。基準に当たらないカードは「新しいカード」）。"""
+def _caption_target(raw_items, j: int) -> tuple[str | None, int]:
+    """j 番目のカードの caption 欄（移動先の名前）と、その文字列の先頭の空白の数。画面の値（raw_items）があるときだけ移動できる。"""
+    if raw_items is None or j >= len(raw_items):
+        return None, 0
+    return f"c_caption{j}", _lead(raw_items[j].get("caption"))
+
+
+def card_views(old: list[dict], new: list[dict], raw_items: list[dict] | None = None) -> list[list[Row]]:
+    """新しい各カードの下に出す差分（変更がなければ空。基準に当たらないカードは「新しいカード」）。
+    raw_items＝画面の今のカード（前後の空白を除く前）。渡すと、caption の変更箇所へ移動できる。"""
     out = []
     for j, i in enumerate(match_items(old, new)):
-        out.append([Row("ins", "新しく追加したカード")] if i is None else card_rows(old[i], new[j]))
+        target, offset = _caption_target(raw_items, j)
+        out.append([Row("ins", "新しく追加したカード")] if i is None else card_rows(old[i], new[j], target, offset))
     return out
 
 
-def items_rows(old: list[dict], new: list[dict]) -> list[Row]:
+def items_rows(old: list[dict], new: list[dict], raw_items: list[dict] | None = None) -> list[Row]:
     """mossItems 全体：カードの追加・削除・並べ替えと、変更したカードの中身。"""
     match = match_items(old, new)
     used = {i for i in match if i is not None}
@@ -119,7 +148,7 @@ def items_rows(old: list[dict], new: list[dict]) -> list[Row]:
         if i is None:
             rows += [Row("head", f"#{j + 1}（追加）"), Row("ins", json.dumps(new[j], ensure_ascii=False), indent=INDENT)]
             continue
-        sub = card_rows(old[i], new[j])
+        sub = card_rows(old[i], new[j], *_caption_target(raw_items, j))
         if sub:
             rows += [Row("head", f"#{j + 1}" + (f"（元 #{i + 1}）" if i != j else ""))] + _nested(sub)
     for i in range(len(old)):
@@ -157,11 +186,14 @@ def _pair(label: str, old: str, new: str) -> list[Row]:
     return [Row("head", label), Row("pair", old, new, indent=INDENT)]
 
 
-def short_rows(key: str, old, new) -> list[Row]:
-    """短い項目 1つの 旧→新（見出し付き）。変更がなければ空。"""
+def short_rows(key: str, old, new, raw=None) -> list[Row]:
+    """短い項目 1つの 旧→新（見出し付き）。変更がなければ空。
+    raw＝画面の今の文字列（name・group・tags・metaTags・slots の欄）。渡すと、その欄の変更箇所へ移動できる。"""
     if key in LIST_KEYS:   # 要素単位の追加・削除
-        rows = tag_lines(list(old or []), list(new or []), [], None, None)
-        return ([Row("head", key)] + _nested(rows)) if rows else []
+        jump = isinstance(raw, str) and key in JUMP_LIST_KEYS
+        ends = [e for _, e in tag_spans(raw)] if jump else None
+        rows = tag_lines(list(old or []), list(new or []), [], ends, 0 if jump else None)
+        return ([Row("head", key)] + _nested(_with_target(rows, key if jump else None))) if rows else []
     if key == "outfits":   # スロットごとの三値
         old, new = old or {}, new or {}
         rows: list[Row] = []
@@ -171,7 +203,10 @@ def short_rows(key: str, old, new) -> list[Row]:
         return rows
     if old == new:
         return []
-    return _pair(key, _short(key, old), _short(key, new))
+    rows = _pair(key, _short(key, old), _short(key, new))
+    if key in SINGLE_KEYS and isinstance(raw, str):   # 1行の欄：新しい値の最後尾へ
+        rows[1] = replace(rows[1], pos=len(raw.rstrip()), target=key)
+    return rows
 
 
 # ---- 全体 ----
@@ -187,14 +222,15 @@ def change_rows(kind: str, new: dict, base: dict) -> list[Row]:
         if key == "id" or key not in n:
             continue
         old_v, new_v = o.get(key), n[key]
+        raw = new.get(key)   # 画面の今の値（前後の空白を除く前）。変更箇所へ移動する位置の計算に使う
         if key in LONG_KEYS:
-            sub = text_rows(key, old_v or "", new_v or "")
+            sub = text_rows(key, old_v or "", new_v or "", key if isinstance(raw, str) else None, _lead(raw))
             rows += ([Row("head", key)] + _nested(sub)) if sub else []
         elif key == "mossItems":
-            sub = items_rows(old_v or [], new_v)
+            sub = items_rows(old_v or [], new_v, raw)
             rows += ([Row("head", key)] + sub) if sub else []
         else:
-            rows += short_rows(key, old_v, new_v)
+            rows += short_rows(key, old_v, new_v, raw)
     return rows
 
 
@@ -207,6 +243,9 @@ def views(kind: str, new: dict, base: dict) -> dict:
     """画面に出す差分（すべて HTML。変更がなければ空文字）：
     fields＝長い欄ごと / cards＝カードごと（新しいカードの枚数分） / changes＝保存前の変更点。"""
     n, o = _normalized(kind, new), _normalized(kind, base)
-    fields = {key: rows_to_html(text_rows(key, o.get(key) or "", n[key] or "")) for key in LONG_KEYS if key in n}
-    cards = [rows_to_html(r) for r in card_views(o.get("mossItems") or [], n["mossItems"])] if "mossItems" in n else []
+    fields = {key: rows_to_html(text_rows(key, o.get(key) or "", n[key] or "", key if isinstance(new.get(key), str) else None,
+                                          _lead(new.get(key))))
+              for key in LONG_KEYS if key in n}
+    cards = ([rows_to_html(r) for r in card_views(o.get("mossItems") or [], n["mossItems"], new.get("mossItems"))]
+             if "mossItems" in n else [])
     return {"fields": fields, "cards": cards, "changes": rows_to_html(change_rows(kind, new, base))}

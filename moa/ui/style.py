@@ -32,7 +32,8 @@ JUMP_JS = r"""
   document.addEventListener('click', function (e) {
     var el = e.target.closest && e.target.closest('[data-moa-pos]');
     if (!el) return;
-    var ta = document.querySelector('#moa-tb-' + el.getAttribute('data-moa-field') + ' textarea');
+    var id = '#moa-tb-' + el.getAttribute('data-moa-field');
+    var ta = document.querySelector(id + ' textarea') || document.querySelector(id + ' input[type=text]');   // 複数行の欄、1行の欄
     if (!ta) return;
     e.preventDefault();
     var cps = Array.from(ta.value);                 // 位置はコードポイント単位。textarea は UTF-16 単位なので数え直す

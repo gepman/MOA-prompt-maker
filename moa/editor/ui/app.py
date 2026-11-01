@@ -22,7 +22,7 @@ from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
                                    save_draft, save_folder)
 from moa.editor.logic.validation import validate_draft
-from moa.ui.style import DEFAULT_PROMPT_FONT_PX, prompt_css
+from moa.ui.style import DEFAULT_PROMPT_FONT_PX, JUMP_JS, TEXTBOX_ID, prompt_css
 
 MAX_SLOTS = 8
 TRI_CHOICES = [("未指定（キーを書かない）", "unset"), ("none（着せない）", "none"), ("Outfit を選ぶ", "outfit")]
@@ -51,7 +51,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             R(f"{name}_show", gr.Markdown(f"選択中：{empty}"))
             R(f"{name}_btn", gr.Button("選ぶ", size="sm", scale=0, min_width=72, variant="primary"))
 
-    with gr.Blocks(title="MOA エディタ", css=prompt_css(prompt_font_px)) as demo:
+    with gr.Blocks(title="MOA エディタ", css=prompt_css(prompt_font_px),
+                   head=f"<script>{JUMP_JS}</script>") as demo:   # 差分のクリックで欄へ移動する JS（ビルダーと共通）
         st = R("st", gr.State(session.new_state()))
         cards_n = R("cards_n", gr.State(0))
 
@@ -85,18 +86,18 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 with gr.Group(visible=False) as entity_box:
                     R("id", gr.Textbox(label="ID（作成時だけ入力。以後は変更できません）", interactive=False))
                     R("id_msg", gr.Markdown())
-                    R("name", gr.Textbox(label="name（表示名）"))
-                    R("tags", gr.Textbox(label="tags（カンマ区切り）"))
+                    R("name", gr.Textbox(label="name（表示名）", elem_id=TEXTBOX_ID.format("name")))
+                    R("tags", gr.Textbox(label="tags（カンマ区切り）", elem_id=TEXTBOX_ID.format("tags")))
 
                     with gr.Group(visible=False) as char_blk:
-                        R("group", gr.Textbox(label="group"))
+                        R("group", gr.Textbox(label="group", elem_id=TEXTBOX_ID.format("group")))
                         R("sex", gr.Radio(["female", "male"], value="female", label="sex"))
                         R("def_mode", gr.Radio(TRI_CHOICES, value="unset", label="defaultOutfit"))
                         pick_row("def_pick", "未指定")
 
                     with gr.Group(visible=False) as rating_blk:
                         R("rating", gr.Radio(["safe", "sensitive", "explicit"], value="safe", label="rating"))
-                        R("metaTags", gr.Textbox(label="metaTags（カンマ区切り。MOSS の summary.meta に入る）"))
+                        R("metaTags", gr.Textbox(label="metaTags（カンマ区切り。MOSS の summary.meta に入る）", elem_id=TEXTBOX_ID.format("metaTags")))
 
                     with gr.Group(visible=False) as canvas_blk:
                         gr.Markdown("⚠ Background では**プレイスホルダーは使えません**。"
@@ -109,7 +110,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                         R("help_act", gr.Markdown())
                         gr.Markdown("**推奨背景**（Scene 作成時の初期値）")
                         pick_row("act_bg")
-                        R("slots", gr.Textbox(label="slots（カンマ区切り。1つ以上、重複不可）"))
+                        R("slots", gr.Textbox(label="slots（カンマ区切り。1つ以上、重複不可）", elem_id=TEXTBOX_ID.format("slots")))
                         R("slot_help", gr.Markdown())
                         rows = []
                         for i in range(MAX_SLOTS):
@@ -125,11 +126,11 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                             R("ex_o", gr.Number(label="others", precision=0, value=0, minimum=0))
 
                     with gr.Group(visible=False) as moss_blk:
-                        R("moss", gr.Textbox(label="moss", lines=6, elem_classes=["moa-prompt"]))
+                        R("moss", gr.Textbox(label="moss", lines=6, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("moss")))
                         R("df_moss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                     with gr.Group(visible=False) as cap_blk:
-                        R("mossCaption", gr.Textbox(label="mossCaption", lines=4, elem_classes=["moa-prompt"]))
+                        R("mossCaption", gr.Textbox(label="mossCaption", lines=4, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("mossCaption")))
                         R("df_mossCaption", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                     with gr.Group(visible=False) as cards_blk:
@@ -144,7 +145,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                                     R(f"c_down{i}", gr.Button("↓", size="sm", scale=0, min_width=40))
                                     R(f"c_del{i}", gr.Button("削除", size="sm", scale=0, min_width=60))
                                     R(f"c_full{i}", gr.Button("全面", size="sm", scale=0, min_width=60))
-                                R(f"c_caption{i}", gr.Textbox(label="caption", lines=2, elem_classes=["moa-prompt"]))
+                                R(f"c_caption{i}", gr.Textbox(label="caption", lines=2, elem_classes=["moa-prompt"],
+                                                           elem_id=TEXTBOX_ID.format(f"c_caption{i}")))
                                 R(f"c_df{i}", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                                 with gr.Row():
                                     for k, lab in zip(("y0", "x0", "y1", "x1"), ("y_min", "x_min", "y_max", "x_max")):
@@ -155,17 +157,17 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                         R("bbox_img", gr.Image(label="bbox プレビュー図（表示専用）", type="pil", interactive=False))
 
                     with gr.Group(visible=False) as anima_blk:
-                        R("anima", gr.Textbox(label="anima", lines=4, elem_classes=["moa-prompt"]))
+                        R("anima", gr.Textbox(label="anima", lines=4, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("anima")))
                         R("df_anima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                     with gr.Group(visible=False) as hair_blk:
-                        R("bodyHairMoss", gr.Textbox(label="bodyHairMoss", lines=2, elem_classes=["moa-prompt"]))
+                        R("bodyHairMoss", gr.Textbox(label="bodyHairMoss", lines=2, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("bodyHairMoss")))
                         R("df_bodyHairMoss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
-                        R("bodyHairAnima", gr.Textbox(label="bodyHairAnima", lines=2, elem_classes=["moa-prompt"]))
+                        R("bodyHairAnima", gr.Textbox(label="bodyHairAnima", lines=2, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("bodyHairAnima")))
                         R("df_bodyHairAnima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
                     with gr.Group(visible=False) as neg_blk:
-                        R("negativeMoss", gr.Textbox(label="negativeMoss", lines=2, elem_classes=["moa-prompt"]))
+                        R("negativeMoss", gr.Textbox(label="negativeMoss", lines=2, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("negativeMoss")))
                         R("df_negativeMoss", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
-                        R("negativeAnima", gr.Textbox(label="negativeAnima", lines=2, elem_classes=["moa-prompt"]))
+                        R("negativeAnima", gr.Textbox(label="negativeAnima", lines=2, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("negativeAnima")))
                         R("df_negativeAnima", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                 with gr.Group(visible=False) as folder_box:

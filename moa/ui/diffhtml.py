@@ -34,6 +34,7 @@ def _ins(text: str, field: str | None = None, pos: int | None = None) -> str:
 
 
 def _row(row: Row, field: str | None) -> str:
+    field = row.target or field   # 行ごとの指定を優先（エディタの変更点一覧は、行ごとに別の欄へ移動する）
     note = f' <span class="moa-note">{escape(row.note.strip())}</span>' if row.note else ""
     cls = "moa-row moa-indent" if row.indent else "moa-row"
     if row.kind == "head":

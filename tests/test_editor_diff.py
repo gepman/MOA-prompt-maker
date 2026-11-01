@@ -21,7 +21,7 @@ def entry_state(repo, kind, eid):
 
 def tags(html, cls):
     tag = "del" if cls == "del" else "ins"
-    return re.findall(rf'<{tag} class="moa-{cls}">(.*?)</{tag}>', html)
+    return re.findall(rf'<{tag} class="moa-{cls}(?: moa-jump)?"[^>]*>(.*?)</{tag}>', html)
 
 
 # ---- 基準（14.2）----

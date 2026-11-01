@@ -32,6 +32,7 @@ class Row:
     # 編集欄の中で、この変更の最後尾（削除なら削除した箇所）にあたる位置（コードポイント単位）。画面でクリックしたときのジャンプ先
     pos: int | None = None
     seg_pos: list[int | None] = field(default_factory=list)   # inline：segs と同じ長さ（eq は None）
+    target: str | None = None      # ジャンプ先の編集欄の名前。行ごとに違う画面（エディタの変更点一覧）で使う。None なら呼び出し側が決める
 
 
 def to_text(row: Row) -> str:
