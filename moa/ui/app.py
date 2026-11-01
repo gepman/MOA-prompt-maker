@@ -17,6 +17,7 @@ from moa.core import Repository
 from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue
 from moa.ui import logic as L
+from moa.ui import quickedit as Q
 from moa.ui.dialogs import pick_folder
 
 
@@ -48,6 +49,7 @@ def build_ui(repo: Repository,
         nav = gr.State(L.new_nav())
         gen = gr.State(None)  # 直近の生成結果のスナップショット（保存ボタンで Scene に記録する。再試行にも使う）
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
+        qe = gr.State(Q.new_qe())  # クイック編集（10.1章）：編集した欄・差分。保存はしない
 
         with gr.Row():
             # ---- 左：共有ブラウザ（常時表示。ボタンで選択先を切り替える）----
@@ -91,15 +93,32 @@ def build_ui(repo: Repository,
                                 pick_o = gr.Button("服装を選ぶ", size="sm")
                                 pick_c.click(partial(on_pick, "char", slot), [nav], NAV_OUT)
                                 pick_o.click(partial(on_pick, "outfit", slot), [nav], NAV_OUT)
-                                outfit_rd.input(partial(on_outfit, slot), [sc, nav, outfit_rd], FULL)
+                                outfit_rd.input(partial(on_outfit, slot), [sc, nav, outfit_rd, qe], FULL)
 
                 neg_cb = gr.Checkbox(label="ネガティブを適用する（既定OFF。OFFでも合成結果は下に表示）", value=False)
                 summary_md = gr.Markdown()
-                moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=False)
-                anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=False)
+                gr.Markdown("_下の4つの欄は直接編集できます（クイック編集）。編集は生成にだけ使われ、保存されません。"
+                            "フォーカスを外すか［差分を更新］で反映します。_")
+                moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=True)
                 with gr.Row():
-                    negm_tb = gr.Textbox(label="ネガティブ（MOSS用）", lines=3, show_copy_button=True, interactive=False)
-                    nega_tb = gr.Textbox(label="ネガティブ（Anima用）", lines=3, show_copy_button=True, interactive=False)
+                    moss_st = gr.Markdown()
+                    moss_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False, scale=0, min_width=200)
+                anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=True)
+                with gr.Row():
+                    anima_st = gr.Markdown()
+                    anima_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False, scale=0, min_width=200)
+                with gr.Row():
+                    with gr.Column():
+                        negm_tb = gr.Textbox(label="ネガティブ（MOSS用）", lines=3, show_copy_button=True, interactive=True)
+                        negm_st = gr.Markdown()
+                        negm_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
+                    with gr.Column():
+                        nega_tb = gr.Textbox(label="ネガティブ（Anima用）", lines=3, show_copy_button=True, interactive=True)
+                        nega_st = gr.Markdown()
+                        nega_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
+                with gr.Accordion("クイック編集の差分（出どころ付き。コピーしてエディタで手直しする用）", open=True):
+                    diff_btn = gr.Button("差分を更新", size="sm")
+                    diff_tb = gr.Textbox(label="差分", lines=6, max_lines=30, show_copy_button=True, interactive=False)
                 issues_md = gr.Markdown()
                 with gr.Accordion("データ読み込みの検証結果（data/ 全体）", open=False):
                     data_issues_md = gr.Markdown()
@@ -156,8 +175,12 @@ def build_ui(repo: Repository,
                     ext_over_btn = gr.Button("上書き保存", variant="stop", size="sm")
 
         NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md, query_tb]
+        QE_VIEW = [moss_st, anima_st, negm_st, nega_st, moss_rb, anima_rb, negm_rb, nega_rb, diff_tb]
+        QE_OUT = [qe] + QE_VIEW
+        QE_TB = dict(zip(Q.FIELDS, [moss_tb, anima_tb, negm_tb, nega_tb]))
+        QE_RB = dict(zip(Q.FIELDS, [moss_rb, anima_rb, negm_rb, nega_rb]))
         FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
-                                 name_tb, slug_tb]
+                                 name_tb, slug_tb] + QE_OUT
         SLUG_IDX = FULL.index(slug_tb)
         GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
@@ -177,16 +200,21 @@ def build_ui(repo: Repository,
         def nav_out(nav_v, msg=None):
             return nav_part(nav_v, msg)
 
-        def full(sc_old, sc_new, nav_v, msg=None, sc_changed=True):
+        def qe_part(qe_v, apply):
+            return [qe_v] + Q.statuses(qe_v, apply) + [gr.update(visible=f in qe_v["edits"]) for f in Q.FIELDS] \
+                + [Q.diff_view(qe_v)]
+
+        def full(sc_old, sc_new, nav_v, qe_v, msg=None, sc_changed=True):
             if not sc_changed:  # フォルダ移動だけのときは、枠の描き直しとコンパイルを避ける
-                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 10
+                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 20
             r = L.compile_view(repo, sc_new)
             apply = sc_new["apply_negative"]
             note = "" if apply else "（未適用・参考表示）"
-            if r is None or not r.ok:
-                moss = anima = negm = nega = ""
-            else:
-                moss, anima, negm, nega = (r.moss_prompt, r.anima_prompt, r.negative_moss, r.negative_anima)
+            # クイック編集：再コンパイルで結果が変わったときだけ編集をリセットする（破棄前の差分は自動で残す）
+            qe2, _ = Q.refresh(qe_v, r, (sc_new["open_seq"], sc_new["action_id"], sc_new["background_id"]),
+                               sc_new["scene_id"])
+            shown = Q.shown_values(qe2)
+            moss, anima, negm, nega = (shown[f] for f in Q.FIELDS)
             issues = L.issues_text(r.issues) if r is not None else ""
             opened = sc_old["open_seq"] != sc_new["open_seq"]
             return [sc_new] + nav_part(nav_v, msg) + [
@@ -196,7 +224,7 @@ def build_ui(repo: Repository,
                 L.summary_text(r), issues, apply,
                 gr.update(value=sc_new["scene_name"]) if opened else gr.skip(),
                 gr.update(value="") if opened else gr.skip(),
-            ]
+            ] + qe_part(qe2, apply)
 
         # ---- イベント ----
         def on_pick(target, slot, nav_v):
@@ -212,21 +240,21 @@ def build_ui(repo: Repository,
             nav2, msg = L.choose_savedir(repo, nav_v)
             return nav_out(nav2, msg)
 
-        def on_outfit(slot, sc_v, nav_v, value):
-            return full(sc_v, L.set_outfit(sc_v, slot, value), nav_v)
+        def on_outfit(slot, sc_v, nav_v, value, qe_v):
+            return full(sc_v, L.set_outfit(sc_v, slot, value), nav_v, qe_v)
 
-        def on_browse(choice, sc_v, nav_v):
+        def on_browse(choice, sc_v, nav_v, qe_v):
             sc2, nav2, msg = L.browse(repo, sc_v, nav_v, choice)
-            return full(sc_v, sc2, nav2, msg, sc_changed=(sc2 != sc_v))
+            return full(sc_v, sc2, nav2, qe_v, msg, sc_changed=(sc2 != sc_v))
 
-        def on_upload(path, sc_v, nav_v):
+        def on_upload(path, sc_v, nav_v, qe_v):
             sc2, nav2, msg = L.from_upload(repo, sc_v, nav_v, path)
-            return full(sc_v, sc2, nav2, msg)
+            return full(sc_v, sc2, nav2, qe_v, msg)
 
-        def on_negative(flag, sc_v, nav_v):
+        def on_negative(flag, sc_v, nav_v, qe_v):
             sc2 = copy.deepcopy(sc_v)
             sc2["apply_negative"] = bool(flag)
-            return full(sc_v, sc2, nav_v)
+            return full(sc_v, sc2, nav_v, qe_v)
 
         def comfy_parts():
             cfg = comfy["cfg"]
@@ -235,30 +263,40 @@ def build_ui(repo: Repository,
             detail = L.issues_text(comfy["issues"]) if comfy["issues"] else ""
             return [head + ("\n\n" + detail if detail else ""), gr.update(interactive=cfg is not None)]
 
-        def on_reload(sc_v, nav_v):
+        def on_reload(sc_v, nav_v, qe_v):
             repo.reload()
             reload_comfy()
-            return full(sc_v, sc_v, nav_v, "🔄 再読み込みしました") + [data_issues_text()] + comfy_parts()
+            return full(sc_v, sc_v, nav_v, qe_v, "🔄 再読み込みしました") + [data_issues_text()] + comfy_parts()
 
-        def on_load(sc_v, nav_v):
+        def on_load(sc_v, nav_v, qe_v):
             reload_comfy()
-            return full(sc_v, sc_v, nav_v, "") + [data_issues_text()] + comfy_parts()
+            return full(sc_v, sc_v, nav_v, qe_v, "") + [data_issues_text()] + comfy_parts()
 
         def effective_of(gp_v):
             cfg = comfy["cfg"]
             return effective_gen(cfg, gp_v["gen"]) if cfg is not None and cfg.samplers else None
 
-        def do_save(force, sc_v, nav_v, slug, display_name, gen_v, gp_v):
+        def do_save(force, sc_v, nav_v, slug, display_name, gen_v, gp_v, qe_v):
             sc2, msg = L.save(repo, sc_v, nav_v, slug, display_name, gen_v, gen_params=gp_v["gen"],
                               effective=effective_of(gp_v), force=force)
-            out = full(sc_v, sc2, nav_v)
+            out = full(sc_v, sc2, nav_v, qe_v)
             if msg.startswith("💾"):
                 out[SLUG_IDX] = gr.update(value="")  # 保存できたら id 欄を空に戻す
             return out + [msg, data_issues_text(), gr.update(visible=msg.startswith(L.EXTERNAL_PREFIX))]
 
-        def on_ext_reload(sc_v, nav_v):
+        def on_ext_reload(sc_v, nav_v, qe_v):
             sc2, nav2, msg = L.reopen_scene(repo, sc_v, nav_v)
-            return full(sc_v, sc2, nav2, msg) + ["", gr.update(visible=False)]
+            return full(sc_v, sc2, nav2, qe_v, msg) + ["", gr.update(visible=False)]
+
+        # ---- クイック編集（10.1章）----
+        def on_qe_commit(qe_v, sc_v, moss, anima, negm, nega):
+            """欄のフォーカスが外れたとき／［差分を更新］：欄の今の文字列を取り込んで、差分を作り直す。"""
+            qe2 = Q.set_edits(qe_v, dict(zip(Q.FIELDS, [moss, anima, negm, nega])))
+            return qe_part(qe2, sc_v["apply_negative"])
+
+        def on_qe_reset(field, qe_v, sc_v):
+            qe2 = Q.reset_field(qe_v, field)
+            return qe_part(qe2, sc_v["apply_negative"]) + [Q.base_values(qe2["result"])[field]]
 
         def on_mkdir(name, nav_v):
             msg = L.make_savedir(repo, nav_v, name)
@@ -324,8 +362,8 @@ def build_ui(repo: Repository,
                       "再生成では新しいシードを使います")
             return [status, [], None, gr.update(visible=False)]
 
-        def stream(events):
-            """iter_run / iter_retry_anima のイベントを、画面の更新に変える。"""
+        def stream(events, quick=None):
+            """iter_run / iter_retry_anima のイベントを、画面の更新に変える。quick＝クイック編集した生成の記録。"""
             skip = gr.skip()
             done = None
             try:
@@ -340,9 +378,14 @@ def build_ui(repo: Repository,
             except OSError as e:
                 yield [f"❌ 画像のコピーに失敗しました：{e}", skip, skip, skip]
                 return
-            yield finished(done)
+            out = finished(done)
+            if quick and out[2] is not None:   # 試し打ち：保存しても compiled に記録しない。再試行で最初の文字列を使う
+                out[2]["quick_edit"] = quick
+                out[0] += ("\n\n✏ クイック編集した文字列での生成です（" + "、".join(Q.FIELD_LABEL[f] for f in quick["fields"])
+                           + "）。試し打ちなので、保存してもシードと画像は記録されません")
+            yield out
 
-        def on_generate(sc_v, copy_dir, gp_v):
+        def on_generate(sc_v, copy_dir, gp_v, moss, anima, negm, nega):
             """生成を実行し、経過を逐次表示する。YAMLへの記録は保存ボタンで行う。"""
             skip = gr.skip()
             cfg = comfy["cfg"]
@@ -356,7 +399,13 @@ def build_ui(repo: Repository,
             if not result.ok:
                 yield ["❌ 検証エラーがあるため生成できません。\n\n" + L.issues_text(result.issues), skip, skip, skip]
                 return
-            yield from stream(iter_run(cfg, result, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]))
+            try:   # 表示中の文字列を送る（送信時に差し替える）。MOSS の JSON が壊れていたら止める
+                result_sent, sent = Q.apply_quick_edit(result, dict(zip(Q.FIELDS, [moss, anima, negm, nega])))
+            except Q.QuickEditError as e:
+                yield [f"❌ {e}", skip, skip, skip]
+                return
+            yield from stream(iter_run(cfg, result_sent, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]),
+                              quick=Q.quick_info(result, sent))
 
         def on_retry(sc_v, copy_dir, gp_v, gen_v):
             """MOSS段が成功して Anima段が失敗したときだけ、Anima段のみを同じシードで再送する。"""
@@ -374,7 +423,9 @@ def build_ui(repo: Repository,
                 yield ["⚠ 最初の生成から次の項目が変わっているため、Anima段だけの再試行はできません："
                        + "、".join(changed) + "\n\n全体を「生成」し直してください", skip, skip, skip]
                 return
-            yield from stream(iter_retry_anima(cfg, result, gen_v, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]))
+            yield from stream(iter_retry_anima(cfg, Q.retry_result(result, gen_v), gen_v,
+                                               Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]),
+                              quick=gen_v.get("quick_edit"))
 
         # ---- 配線 ----
         pick_scene_btn.click(partial(on_pick, "scene", None), [nav], NAV_OUT, api_name="pick_scene")
@@ -385,22 +436,22 @@ def build_ui(repo: Repository,
         query_tb.submit(on_search, [query_tb, nav], NAV_OUT, api_name="search")
         search_btn.click(on_search, [query_tb, nav], NAV_OUT, api_name="search_btn")
         clear_q_btn.click(on_clear_query, [nav], NAV_OUT, api_name="clear_query")
-        lst.input(on_browse, [lst, sc, nav], FULL, api_name="browse").then(
+        lst.input(on_browse, [lst, sc, nav, qe], FULL, api_name="browse").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_browse")
-        upload.upload(on_upload, [upload, sc, nav], FULL, api_name="upload").then(
+        upload.upload(on_upload, [upload, sc, nav, qe], FULL, api_name="upload").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_upload")
-        neg_cb.input(on_negative, [neg_cb, sc, nav], FULL, api_name="negative")
+        neg_cb.input(on_negative, [neg_cb, sc, nav, qe], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
-        reload_btn.click(on_reload, [sc, nav], FULL + COMFY_OUT, api_name="reload").then(
+        reload_btn.click(on_reload, [sc, nav, qe], FULL + COMFY_OUT, api_name="reload").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_reload")
         SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row]
-        save_btn.click(partial(do_save, False), [sc, nav, slug_tb, name_tb, gen, gp], SAVE_OUT, api_name="save")
-        ext_over_btn.click(partial(do_save, True), [sc, nav, slug_tb, name_tb, gen, gp], SAVE_OUT,
+        save_btn.click(partial(do_save, False), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT, api_name="save")
+        ext_over_btn.click(partial(do_save, True), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT,
                            api_name="save_overwrite")
-        ext_reload_btn.click(on_ext_reload, [sc, nav], FULL + [save_msg, ext_row], api_name="ext_reload").then(
+        ext_reload_btn.click(on_ext_reload, [sc, nav, qe], FULL + [save_msg, ext_row], api_name="ext_reload").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_ext_reload")
         mkdir_btn.click(on_mkdir, [newdir_tb, nav], NAV_OUT + [newdir_tb], api_name="mkdir")
-        demo.load(on_load, [sc, nav], FULL + COMFY_OUT, api_name="init").then(
+        demo.load(on_load, [sc, nav, qe], FULL + COMFY_OUT, api_name="init").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_init")
         for (stage, param), (sl, src, rb) in items.items():
             sl.release(partial(on_release, stage, param), [sl, gp], [gp, src, rb],
@@ -409,7 +460,13 @@ def build_ui(repo: Repository,
                      api_name=f"gp_reset_{stage}_{param}")
         pick_dir_btn.click(on_pick_dir, [copy_dir_tb], [copy_dir_tb, gen_status], api_name="pick_dir")
         clear_dir_btn.click(lambda: "", None, [copy_dir_tb], api_name="clear_dir")
-        gen_btn.click(on_generate, [sc, copy_dir_tb, gp], GEN_OUT, api_name="generate")
+        gen_btn.click(on_generate, [sc, copy_dir_tb, gp, moss_tb, anima_tb, negm_tb, nega_tb], GEN_OUT, api_name="generate")
+        QE_IN = [qe, sc, moss_tb, anima_tb, negm_tb, nega_tb]
+        for f, tb in QE_TB.items():
+            tb.blur(on_qe_commit, QE_IN, QE_OUT, api_name=f"qe_blur_{f}")
+        diff_btn.click(on_qe_commit, QE_IN, QE_OUT, api_name="qe_diff")
+        for f, rb in QE_RB.items():
+            rb.click(partial(on_qe_reset, f), [qe, sc], QE_OUT + [QE_TB[f]], api_name=f"qe_reset_{f}")
         retry_btn.click(on_retry, [sc, copy_dir_tb, gp, gen], GEN_OUT, api_name="retry")
 
     return demo

@@ -9,6 +9,7 @@ from .models import CompileResult, MossItem, Scene, SlotResolution, has_error
 from .people import people_tags, strip_template_count_tags
 from .repository import Repository
 from .resolve import resolve_outfit
+from .sourcemap import Origin, build_sources, gen as gen_origin
 from .textutil import clean_tags, collapse_ws, join_negative, strip_block
 from .validate import scene_issues
 
@@ -56,7 +57,7 @@ def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
     # 5.2章：服装の解決と、スロットごとのブロック（前後の空白を除去してから使う）
     moss_blocks: dict[str, dict[str, str]] = {}
     anima_blocks: dict[str, dict[str, str]] = {}
-    chars, outfits = [], []
+    chars, outfits, slot_info = [], [], []
     for slot in action.slots:
         entry = scene.cast[slot]
         char = repo.character(entry.character)
@@ -69,6 +70,7 @@ def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
                               "outfit": strip_block(outfit.anima) if outfit else "",
                               "bodyHair": strip_block(char.body_hair_anima)}
         chars.append(char)
+        slot_info.append((slot, char, outfit))
         if outfit:
             outfits.append(outfit)
         result.slots.append(SlotResolution(slot, char.id, res.outfit_id, res.source))
@@ -108,4 +110,15 @@ def compile_scene(repo: Repository, scene: Scene) -> CompileResult:
     result.negative_anima = join_negative(
         [BASE_NEGATIVE_ANIMA] + [c.negative_anima for c in chars] + [o.negative_anima for o in outfits]
         + [bg.negative_anima, action.negative_anima])
+
+    # 10.1章：出どころの記録（出力文字列には影響しない。層の並びは上のネガティブ合成と同じ）
+    def layers(attr: str, base: str):
+        return ([(base, gen_origin("negativeBase"))]
+                + [(getattr(c, attr), Origin("character", c.id, "negativeMoss" if attr == "negative_moss" else "negativeAnima")) for c in chars]
+                + [(getattr(o, attr), Origin("outfit", o.id, "negativeMoss" if attr == "negative_moss" else "negativeAnima")) for o in outfits]
+                + [(getattr(bg, attr), Origin("background", bg.id, "negativeMoss" if attr == "negative_moss" else "negativeAnima")),
+                   (getattr(action, attr), Origin("action", action.id, "negativeMoss" if attr == "negative_moss" else "negativeAnima"))])
+
+    result.sources = build_sources(bg, action, slot_info, result.rating, moss["summary"]["meta"], ptags,
+                                   layers("negative_moss", BASE_NEGATIVE_MOSS), layers("negative_anima", BASE_NEGATIVE_ANIMA))
     return result

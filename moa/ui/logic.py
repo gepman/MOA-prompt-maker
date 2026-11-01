@@ -442,7 +442,10 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
             return sc, "❌ 検証エラーがあるため保存できません"
 
         record, note = None, ""
-        if generated and generated.get("images"):
+        if generated and generated.get("images") and generated.get("quick_edit"):   # 10.1章：試し打ちは記録しない
+            note = ("\n\nℹ クイック編集した文字列での生成（試し打ち）なので、シードと画像は記録していません"
+                    "（Scene と compiled は編集内容を含まないコンパイル結果のまま保存します）")
+        elif generated and generated.get("images"):
             diff = differences(generated, result, effective)
             if diff:
                 note = ("\n\nℹ 生成後に次の項目が変わったため、生成結果（シード・画像）は記録していません"

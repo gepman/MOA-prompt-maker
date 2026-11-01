@@ -315,16 +315,21 @@ def differences(snap: dict, result: CompileResult, effective_gen: dict | None) -
     gen の実効値（MOSS steps/cfg、Anima steps/cfg/denoise）。
     """
     out = []
-    if snap["moss_prompt"] != result.moss_prompt:
+    # クイック編集で生成したときは、送った文字列ではなく編集前（コンパイル結果）で比べる（再試行の可否のため）。
+    # 編集した生成を記録しないことは、保存側（moa.ui.logic.save）が snapshot の quick_edit で止める
+    base = (snap.get("quick_edit") or {}).get("base") or {
+        "moss": snap["moss_prompt"], "anima": snap["anima_prompt"],
+        "negm": snap["negative_moss"], "nega": snap["negative_anima"]}
+    if base["moss"] != result.moss_prompt:
         out.append("mossPrompt")
-    if snap["anima_prompt"] != result.anima_prompt:
+    if base["anima"] != result.anima_prompt:
         out.append("animaPrompt")
     if snap["negative_applied"] != result.apply_negative:
         out.append("ネガティブ適用")
     elif result.apply_negative:
-        if snap["negative_moss"] != result.negative_moss:
+        if base["negm"] != result.negative_moss:
             out.append("ネガティブ（MOSS）")
-        if snap["negative_anima"] != result.negative_anima:
+        if base["nega"] != result.negative_anima:
             out.append("ネガティブ（Anima）")
     if snap["background"] != result.background_id:
         out.append("Background")

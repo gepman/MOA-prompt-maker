@@ -202,6 +202,7 @@ class CompileResult:
     negative_anima: str = ""
     slots: list[SlotResolution] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
+    sources: object | None = None  # moa.core.sourcemap.SourceMap（出どころの記録。10.1章）
 
     @property
     def ok(self) -> bool:
