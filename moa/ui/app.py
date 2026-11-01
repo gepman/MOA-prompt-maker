@@ -54,7 +54,12 @@ def build_ui(repo: Repository,
             with gr.Column(scale=2, min_width=320):
                 target_md = gr.Markdown(L.target_label(L.new_nav()))
                 crumbs_md = gr.Markdown()
-                lst = gr.Radio(choices=[], value=None, label="一覧（クリックで選択／フォルダは移動）")
+                with gr.Row():
+                    query_tb = gr.Textbox(label="名前検索（Enter か 🔍 で実行。空にして Enter でフォルダ表示に戻る）",
+                                          placeholder="name・ID・tags で部分一致", scale=4)
+                    search_btn = gr.Button("🔍", size="sm", scale=0, min_width=48)
+                    clear_q_btn = gr.Button("✕", size="sm", scale=0, min_width=48)
+                lst =gr.Radio(choices=[], value=None, label="一覧（クリックで選択／フォルダは移動）")
                 browse_msg = gr.Markdown()
                 with gr.Row():
                     upload = gr.UploadButton("YAMLファイルを指定", file_types=[".yaml", ".yml"], size="sm")
@@ -150,7 +155,7 @@ def build_ui(repo: Repository,
                     ext_reload_btn = gr.Button("再読み込み（編集を破棄）", size="sm")
                     ext_over_btn = gr.Button("上書き保存", variant="stop", size="sm")
 
-        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md]
+        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md, query_tb]
         FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
                                  name_tb, slug_tb]
         SLUG_IDX = FULL.index(slug_tb)
@@ -166,7 +171,8 @@ def build_ui(repo: Repository,
         def nav_part(nav_v, msg):
             choices, crumbs = L.listing(repo, nav_v)
             return [nav_v, gr.update(choices=choices, value=None), crumbs, L.target_label(nav_v),
-                    gr.skip() if msg is None else msg, L.savedir_text(repo, nav_v)]
+                    gr.skip() if msg is None else msg, L.savedir_text(repo, nav_v),
+                    nav_v.get("query", "")]
 
         def nav_out(nav_v, msg=None):
             return nav_part(nav_v, msg)
@@ -195,6 +201,12 @@ def build_ui(repo: Repository,
         # ---- イベント ----
         def on_pick(target, slot, nav_v):
             return nav_out(L.set_target(nav_v, target, slot), "")
+
+        def on_search(q, nav_v):
+            return nav_out(L.set_query(nav_v, q), "")
+
+        def on_clear_query(nav_v):
+            return nav_out(L.set_query(nav_v, ""), "")
 
         def on_setdir(nav_v):
             nav2, msg = L.choose_savedir(repo, nav_v)
@@ -370,6 +382,9 @@ def build_ui(repo: Repository,
         pick_bg_btn.click(partial(on_pick, "background", None), [nav], NAV_OUT, api_name="pick_background")
         pick_save_btn.click(partial(on_pick, "savedir", None), [nav], NAV_OUT, api_name="pick_savedir")
         setdir_btn.click(on_setdir, [nav], NAV_OUT, api_name="set_savedir")
+        query_tb.submit(on_search, [query_tb, nav], NAV_OUT, api_name="search")
+        search_btn.click(on_search, [query_tb, nav], NAV_OUT, api_name="search_btn")
+        clear_q_btn.click(on_clear_query, [nav], NAV_OUT, api_name="clear_query")
         lst.input(on_browse, [lst, sc, nav], FULL, api_name="browse").then(
             refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_browse")
         upload.upload(on_upload, [upload, sc, nav], FULL, api_name="upload").then(

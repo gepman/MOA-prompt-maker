@@ -14,16 +14,15 @@ from moa.core.models import Issue
 from moa.core.repository import Repository
 from moa.editor.logic import cards as C
 from moa.editor.logic import forms, session, tree
+from moa.editor.logic import picker as PK
 from moa.editor.logic.bboxdraw import draw_bboxes
 from moa.editor.logic.forms import DEFAULT_CANVAS, KIND_LABEL, MAX_ITEMS
-from moa.editor.logic.preview import options as preview_options
 from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
                                    save_draft, save_folder)
 from moa.editor.logic.validation import validate_draft
 
 MAX_SLOTS = 8
-SHOW_LIMIT = 50
 TRI_CHOICES = [("未指定（キーを書かない）", "unset"), ("none（着せない）", "none"), ("Outfit を選ぶ", "outfit")]
 SECTION_CHOICES = [("キャラ", "characters"), ("服装", "outfits"), ("背景", "backgrounds"), ("行為", "actions")]
 CARD_FIELDS = ("label", "caption", "y0", "x0", "y1", "x1")
@@ -36,16 +35,6 @@ def issue_lines(issues: list[Issue]) -> str:
                      for i in issues)
 
 
-def ref_choices(options: list[tuple[str, str]], query: str, current: str | None,
-                head: list[tuple[str, str]] | None = None) -> list[tuple[str, str]]:
-    """名前で絞り込んだ候補。選択中のものは、絞り込みから外れても残す。"""
-    q = (query or "").strip().casefold()
-    shown = [o for o in options if q in o[0].casefold() or q in o[1].casefold()][:SHOW_LIMIT]
-    if current and all(v != current for _, v in shown):
-        shown = [next((o for o in options if o[1] == current), (f"{current}（見つかりません）", current))] + shown
-    return list(head or []) + shown
-
-
 def build_editor(repo: Repository) -> gr.Blocks:
     c: dict = {}   # 名前 → 部品
 
@@ -53,8 +42,12 @@ def build_editor(repo: Repository) -> gr.Blocks:
         c[name] = comp
         return comp
 
-    def outfit_options():
-        return [(f"{repo.outfit(i).name}（{i}）", i) for i in repo.ids("outfit")]
+    def pick_row(name: str, empty: str = "（未設定）"):
+        """選択欄：選択中の項目の表示＋［選ぶ］。値は gr.State（名前 `name`）に持つ。共通ピッカー（右サイドバー）で選ぶ。"""
+        R(name, gr.State(None))
+        with gr.Row():
+            R(f"{name}_show", gr.Markdown(f"選択中：{empty}"))
+            R(f"{name}_btn", gr.Button("選ぶ", size="sm", scale=0, min_width=72, variant="primary"))
 
     with gr.Blocks(title="MOA エディタ") as demo:
         st = R("st", gr.State(session.new_state()))
@@ -97,8 +90,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
                         R("group", gr.Textbox(label="group"))
                         R("sex", gr.Radio(["female", "male"], value="female", label="sex"))
                         R("def_mode", gr.Radio(TRI_CHOICES, value="unset", label="defaultOutfit"))
-                        R("def_q", gr.Textbox(label="Outfit を検索", placeholder="名前で絞り込み"))
-                        R("def_pick", gr.Radio(choices=[], value=None, label="Outfit"))
+                        pick_row("def_pick", "未指定")
 
                     with gr.Group(visible=False) as rating_blk:
                         R("rating", gr.Radio(["safe", "sensitive", "explicit"], value="safe", label="rating"))
@@ -113,16 +105,15 @@ def build_editor(repo: Repository) -> gr.Blocks:
 
                     with gr.Group(visible=False) as action_blk:
                         R("help_act", gr.Markdown())
-                        R("act_bg_q", gr.Textbox(label="推奨背景を検索", placeholder="名前で絞り込み"))
-                        R("act_bg", gr.Radio(choices=[("（未設定）", "")], value="", label="推奨背景（Scene 作成時の初期値）"))
+                        gr.Markdown("**推奨背景**（Scene 作成時の初期値）")
+                        pick_row("act_bg")
                         R("slots", gr.Textbox(label="slots（カンマ区切り。1つ以上、重複不可）"))
                         R("slot_help", gr.Markdown())
                         rows = []
                         for i in range(MAX_SLOTS):
                             with gr.Group(visible=False) as row:
                                 R(f"o_mode{i}", gr.Radio(TRI_CHOICES, value="unset", label=f"outfits.slot{i}"))
-                                R(f"o_q{i}", gr.Textbox(label="Outfit を検索", placeholder="名前で絞り込み"))
-                                R(f"o_pick{i}", gr.Radio(choices=[], value=None, label="Outfit"))
+                                pick_row(f"o_pick{i}", "未指定")
                             R(f"o_row{i}", row)
                             rows.append(row)
                         gr.Markdown("**extras**（キャスト以外に特定の人物として描く人数。全部 0 なら書きません）")
@@ -199,16 +190,16 @@ def build_editor(repo: Repository) -> gr.Blocks:
             with gr.Column(scale=4, min_width=360):
                 gr.Markdown("### プレビュー\n**未保存の内容でプレビュー中**（保存ファイルには触りません）")
                 with gr.Group(visible=False) as pv_act_blk:
-                    R("pv_act_q", gr.Textbox(label="Action を検索"))
-                    R("pv_act", gr.Radio(choices=[], value=None, label="Action"))
+                    gr.Markdown("**Action**")
+                    pick_row("pv_act", "（自動）")
                 with gr.Group(visible=False) as pv_slot_blk:
                     R("pv_slot", gr.Radio(choices=[], value=None, label="スロット"))
                 with gr.Group(visible=False) as pv_char_blk:
-                    R("pv_char_q", gr.Textbox(label="キャラを検索"))
-                    R("pv_char", gr.Radio(choices=[], value=None, label="キャラ"))
+                    gr.Markdown("**キャラ**")
+                    pick_row("pv_char", "（自動）")
                 with gr.Group(visible=False) as pv_bg_blk:
-                    R("pv_bg_q", gr.Textbox(label="Background を検索"))
-                    R("pv_bg", gr.Radio(choices=[], value=None, label="Background"))
+                    gr.Markdown("**Background**")
+                    pick_row("pv_bg", "（自動）")
                 with gr.Row():
                     pv_use = gr.Button("ツリーで選択中のものを使う", size="sm")
                     pv_btn = gr.Button("プレビュー更新", variant="primary", size="sm")
@@ -221,6 +212,24 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 R("pv_nega", gr.Textbox(label="ネガティブ（Anima）", lines=2, interactive=False))
                 R("pv_img", gr.Image(label="bbox プレビュー図（背景＝青、行為＝橙、はみ出し＝赤）", type="pil",
                                      interactive=False))
+
+        # ---- 共通ピッカー（右サイドバー）----
+        R("pk", gr.State(PK.new_pk()))
+        with gr.Sidebar(position="right", open=False, width=420) as pk_bar:
+            R("pk_target", gr.Markdown())
+            R("pk_crumbs", gr.Radio(choices=[], value=None, label="パンくず（押すとそのフォルダへ）"))
+            with gr.Row():
+                R("pk_q", gr.Textbox(label="名前検索（Enter か 🔍。空にして Enter でフォルダ表示に戻る）",
+                                     placeholder="name・ID・tags で部分一致", scale=4))
+                R("pk_search", gr.Button("🔍", size="sm", scale=0, min_width=48))
+                R("pk_clear_q", gr.Button("✕", size="sm", scale=0, min_width=48))
+            R("pk_msg", gr.Markdown())
+            with gr.Row():
+                R("pk_dirs", gr.Radio(choices=[], value=None, label="フォルダ", scale=1))
+                R("pk_items", gr.Radio(choices=[], value=None, label="項目（名前（ID））", scale=2))
+            R("pk_none", gr.Button("空にする", size="sm", visible=False))
+            R("pk_cancel", gr.Button("キャンセル"))
+        R("pk_bar", pk_bar)
 
         # ---- 部品の一覧 ----
         blocks = {"entity": entity_box, "folder": folder_box, "buttons": buttons_row, "char": char_blk,
@@ -236,6 +245,11 @@ def build_editor(repo: Repository) -> gr.Blocks:
                       + ["anima", "bodyHairMoss", "bodyHairAnima", "negativeMoss", "negativeAnima",
                          "f_name", "f_desc", "f_order"])
         PV_NAMES = ["pv_act", "pv_slot", "pv_char", "pv_bg"]
+        # ピッカーの選択先 → 値を持つ部品の名前 / 三値コントロールの名前
+        TARGET_STATE = {"def": "def_pick", "act_bg": "act_bg", "pv_act": "pv_act", "pv_char": "pv_char",
+                        "pv_bg": "pv_bg", **{f"o{i}": f"o_pick{i}" for i in range(MAX_SLOTS)}}
+        TARGET_MODE = {"def": "def_mode", **{f"o{i}": f"o_mode{i}" for i in range(MAX_SLOTS)}}
+        STATE_FORM = {"def_pick", "act_bg", *(f"o_pick{i}" for i in range(MAX_SLOTS))}   # gr.State（.input を持たない）
         FORM = [c[n] for n in FORM_NAMES]
         OUT = list(c.values()) + list(blocks.values()) + list(boxes.values())
 
@@ -275,17 +289,20 @@ def build_editor(repo: Repository) -> gr.Blocks:
                                      "others": int(a["ex_o"] or 0)}}
             return v
 
+        def set_ref(name: str, kind: str, entity_id: str | None, mode: str = "outfit", empty: str = "（未設定）") -> dict:
+            """選択欄の値（State）と表示を入れる。mode は三値コントロール（unset / none / outfit）。"""
+            return {c[name]: entity_id,
+                    c[f"{name}_show"]: "選択中：" + PK.shown(repo, kind, entity_id, mode=mode, empty=empty)}
+
         def slot_rows(slots: list[str], outfits: dict) -> dict:
             """スロットごとの服装指定の行（最大 MAX_SLOTS）。"""
             out = {}
-            opts = outfit_options()
             for i in range(MAX_SLOTS):
                 if i < len(slots):
                     mode, oid = forms.outfit_mode(outfits.get(slots[i]))
                     out[c[f"o_row{i}"]] = gr.update(visible=True)
                     out[c[f"o_mode{i}"]] = gr.update(value=mode, label=f"outfits.{slots[i]}")
-                    out[c[f"o_pick{i}"]] = gr.update(choices=ref_choices(opts, "", oid), value=oid)
-                    out[c[f"o_q{i}"]] = ""
+                    out |= set_ref(f"o_pick{i}", "outfit", oid, mode, "（未選択）")
                 else:
                     out[c[f"o_row{i}"]] = gr.update(visible=False)
             return out
@@ -372,14 +389,9 @@ def build_editor(repo: Repository) -> gr.Blocks:
 
         def pv_part(st_v: dict) -> dict:
             """プレビューの選択欄を、編集中の種別に合わせて作り直す。"""
-            opts = preview_options(repo)
-            kind = st_v["kind"]
-            out = {c["pv_act"]: gr.update(choices=opts["action"], value=None),
-                   c["pv_bg"]: gr.update(choices=opts["background"], value=None),
-                   c["pv_char"]: gr.update(choices=opts["character"], value=None),
-                   c["pv_slot"]: gr.update(choices=[], value=None)}
-            for n in ("pv_act_q", "pv_bg_q", "pv_char_q"):
-                out[c[n]] = ""
+            out = {c["pv_slot"]: gr.update(choices=[], value=None)}
+            for n, kind in (("pv_act", "action"), ("pv_bg", "background"), ("pv_char", "character")):
+                out |= set_ref(n, kind, None, empty="（自動）")
             for n in ("pv_notes", "pv_summary", "pv_issues", "pv_moss", "pv_anima", "pv_negm", "pv_nega"):
                 out[c[n]] = ""
             out[c["pv_img"]] = None
@@ -390,6 +402,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
             out = {c["st"]: st_v, c["head"]: head_text(st_v), c["issues"]: "", c["save_msg"]: msg or "",
                    c["nav_msg"]: ""}
             out |= tree_part(st_v) | visibility(st_v) | hide_boxes() | pv_part(st_v)
+            out[c["pk_bar"]] = gr.update(open=False)   # ピッカーは閉じる（前回のフォルダは pk に残す）
             mode, kind = st_v["mode"], st_v["kind"]
             v = st_v["loaded"]
             out[c["status"]] = status_text(st_v, v)
@@ -408,9 +421,9 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 if kind == "character":
                     mode3, oid = forms.outfit_mode(v["defaultOutfit"])
                     out |= {c["group"]: v["group"], c["sex"]: v["sex"], c["moss"]: v["moss"],
-                            c["def_mode"]: mode3, c["def_q"]: "",
-                            c["def_pick"]: gr.update(choices=ref_choices(outfit_options(), "", oid), value=oid),
+                            c["def_mode"]: mode3,
                             c["bodyHairMoss"]: v["bodyHairMoss"], c["bodyHairAnima"]: v["bodyHairAnima"]}
+                    out |= set_ref("def_pick", "outfit", oid, mode3, "（未選択）")
                 elif kind == "outfit":
                     out[c["moss"]] = v["moss"]
                 else:
@@ -421,11 +434,8 @@ def build_editor(repo: Repository) -> gr.Blocks:
                     if kind == "background":
                         out |= {c["cw"]: v["canvas"]["w"], c["ch"]: v["canvas"]["h"]}
                     else:
-                        bg_opts = [("（未設定）", "")] + [(f"{repo.background(i).name}（{i}）", i)
-                                                          for i in repo.ids("background")]
-                        cur = v.get("background") or ""
-                        out |= {c["act_bg"]: gr.update(choices=ref_choices(bg_opts[1:], "", cur, bg_opts[:1]), value=cur),
-                                c["act_bg_q"]: "", c["slots"]: forms.join_list(v["slots"]),
+                        out |= set_ref("act_bg", "background", v.get("background") or "")
+                        out |= {c["slots"]: forms.join_list(v["slots"]),
                                 c["ex_f"]: v["extras"].get("female", 0), c["ex_m"]: v["extras"].get("male", 0),
                                 c["ex_o"]: v["extras"].get("others", 0)}
                         out |= slot_rows(v["slots"], v["outfits"]) | slot_help(v["slots"])
@@ -482,8 +492,69 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 out |= tree_part(st_v) | {c["folder_tb"]: ""}
             return out
 
-        def on_filter(options_fn, head, q, cur):
-            return gr.update(choices=ref_choices(options_fn(), q, cur or None, head), value=cur)
+        # ---- 共通ピッカー ----
+        def pk_part(pk_v: dict) -> dict:
+            """ピッカーの画面（開閉・パンくず・フォルダ・項目・検索欄）。"""
+            v = PK.view(repo, pk_v)
+            show_dirs = bool(v["dirs"])
+            show_items = bool(v["items"]) or not show_dirs   # フォルダだけ／項目だけのときは、あるほうを全幅にする
+            return {c["pk"]: pk_v, c["pk_bar"]: gr.update(open=pk_v["target"] is not None),
+                    c["pk_target"]: v["target_md"], c["pk_crumbs"]: gr.update(choices=v["crumbs"], value=v["cwd"]),
+                    c["pk_dirs"]: gr.update(choices=v["dirs"], value=None, visible=show_dirs),
+                    c["pk_items"]: gr.update(choices=v["items"], value=None, visible=show_items),
+                    c["pk_msg"]: v["msg"],
+                    c["pk_q"]: pk_v["query"],
+                    c["pk_none"]: gr.update(visible=v["can_clear"], value=v["clear_text"] or "空にする")}
+
+        def on_open(target, pk_v, cur, slots_text):
+            label = None
+            if target.startswith("o") and target[1:].isdigit():
+                slots = forms.split_list(slots_text)
+                i = int(target[1:])
+                label = f"outfits.{slots[i]}" if i < len(slots) else None
+            return pk_part(PK.open_picker(repo, pk_v, target, cur or None, label))
+
+        def on_pk_enter(rel, pk_v):
+            return pk_part(PK.enter(repo, pk_v, rel)) if rel else {}
+
+        def on_pk_search(q, pk_v):
+            return pk_part(PK.set_query(pk_v, q)) if pk_v["target"] else {}
+
+        def on_pk_clear_query(pk_v):
+            return pk_part(PK.set_query(pk_v, "")) if pk_v["target"] else {}
+
+        def on_pk_cancel(pk_v):
+            return pk_part(PK.close(pk_v))
+
+        def apply_pick(pk_v, st_v, n, args, entity_id: str | None):
+            """ピッカーで選んだ値（entity_id。None は空にする）を欄に入れて、ピッカーを閉じる。"""
+            t = pk_v["target"]
+            if t is None:
+                return {}
+            kind = PK.TARGETS[t][0]
+            out = pk_part(PK.pick(repo, pk_v, entity_id) if entity_id else PK.close(pk_v))
+            name = TARGET_STATE[t]
+            value = entity_id or ("" if t == "act_bg" else None)
+            out |= set_ref(name, kind, value, "outfit", PK.EMPTY_TEXT.get(t, "（未選択）"))
+            a = dict(zip(FORM_NAMES, args))
+            if name in a:   # フォームの値（プレビューの選択欄は保存対象ではない）
+                a[name] = value
+                if t in TARGET_MODE:
+                    out[c[TARGET_MODE[t]]] = a[TARGET_MODE[t]] = "outfit"
+                v = gather(st_v, n, list(a.values()))
+                out[c["status"]] = status_text(st_v, v)
+                if t == "act_bg" and v is not None:
+                    out[c["bbox_img"]] = own_image(st_v["kind"], v)
+            return out
+
+        def on_pk_pick(entity_id, pk_v, st_v, n, *args):
+            return apply_pick(pk_v, st_v, n, args, entity_id) if entity_id else {}
+
+        def on_pk_none(pk_v, st_v, n, *args):
+            return apply_pick(pk_v, st_v, n, args, None)
+
+        def mode_show(name, mode, cur):
+            return "選択中：" + PK.shown(repo, "outfit", cur, mode=mode, empty="（未選択）")
 
         def on_dirty(st_v, n, *args):
             v = current(st_v, n, args)
@@ -498,9 +569,6 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 if i < len(slots):
                     out[c[f"o_mode{i}"]] = gr.update(label=f"outfits.{slots[i]}")
             return out | slot_help(slots) | on_dirty(st_v, n, *args)
-
-        def pick_sets_mode(pick):
-            return gr.update(value="outfit" if pick else "unset")
 
         # カード操作
         def card_op(op: str, i: int, st_v, n, *args):
@@ -580,7 +648,7 @@ def build_editor(repo: Repository) -> gr.Blocks:
             out = {}
             for name, kind in (("pv_act", "action"), ("pv_bg", "background"), ("pv_char", "character")):
                 if last.get(kind):
-                    out[c[name]] = gr.update(value=last[kind])
+                    out |= set_ref(name, kind, last[kind], empty="（自動）")
             return out
 
         def on_preview(st_v, n, *args):
@@ -600,17 +668,14 @@ def build_editor(repo: Repository) -> gr.Blocks:
                 out[c["pv_img"]] = draw_bboxes(res.canvas, [("background", res.bg_items), ("action", res.action_items)])
             ch = res.chosen
             if ch:
-                opts = preview_options(repo)
-                out[c["pv_act"]] = gr.update(choices=ref_choices(opts["action"], "", ch["action"]), value=ch["action"])
-                out[c["pv_bg"]] = gr.update(choices=ref_choices(opts["background"], "", ch["background"]),
-                                            value=ch["background"])
+                out |= set_ref("pv_act", "action", ch["action"], empty="（自動）")
+                out |= set_ref("pv_bg", "background", ch["background"], empty="（自動）")
                 act = None if st_v["kind"] == "action" else repo.action(ch["action"])
                 slots = forms.normalize("action", v)["slots"] if st_v["kind"] == "action" else (
                     list(act.slots) if act else [])
                 out[c["pv_slot"]] = gr.update(choices=slots, value=ch["slot"] if ch["slot"] in slots else None)
                 if ch.get("character") and st_v["kind"] == "outfit":
-                    out[c["pv_char"]] = gr.update(choices=ref_choices(opts["character"], "", ch["character"]),
-                                                  value=ch["character"])
+                    out |= set_ref("pv_char", "character", ch["character"], empty="（自動）")
             return out
 
         def on_load(st_v):
@@ -626,22 +691,23 @@ def build_editor(repo: Repository) -> gr.Blocks:
         cancel_btn.click(on_cancel, [c["st"]], OUT, api_name="cancel")
         mkdir_btn.click(on_mkdir, [c["folder_tb"], c["st"]], OUT, api_name="mkdir")
 
-        for q, pick, fn, head in ((c["def_q"], c["def_pick"], outfit_options, None),
-                                  (c["pv_act_q"], c["pv_act"], lambda: preview_options(repo)["action"], None),
-                                  (c["pv_bg_q"], c["pv_bg"], lambda: preview_options(repo)["background"], None),
-                                  (c["pv_char_q"], c["pv_char"], lambda: preview_options(repo)["character"], None),
-                                  (c["act_bg_q"], c["act_bg"],
-                                   lambda: [(f"{repo.background(i).name}（{i}）", i) for i in repo.ids("background")],
-                                   [("（未設定）", "")])):
-            q.input(partial(on_filter, fn, head), [q, pick], [pick])
-        for i in range(MAX_SLOTS):
-            c[f"o_q{i}"].input(partial(on_filter, outfit_options, None), [c[f"o_q{i}"], c[f"o_pick{i}"]],
-                               [c[f"o_pick{i}"]])
-            c[f"o_pick{i}"].input(pick_sets_mode, [c[f"o_pick{i}"]], [c[f"o_mode{i}"]])
-        c["def_pick"].input(pick_sets_mode, [c["def_pick"]], [c["def_mode"]])
+        # 共通ピッカー
+        for t, name in TARGET_STATE.items():
+            c[f"{name}_btn"].click(partial(on_open, t), [c["pk"], c[name], c["slots"]], OUT, api_name=f"pick_{t}")
+        c["pk_dirs"].input(on_pk_enter, [c["pk_dirs"], c["pk"]], OUT, api_name="pk_dir")
+        c["pk_crumbs"].input(on_pk_enter, [c["pk_crumbs"], c["pk"]], OUT, api_name="pk_crumb")
+        c["pk_q"].submit(on_pk_search, [c["pk_q"], c["pk"]], OUT, api_name="pk_search")
+        c["pk_search"].click(on_pk_search, [c["pk_q"], c["pk"]], OUT, api_name="pk_search_btn")
+        c["pk_clear_q"].click(on_pk_clear_query, [c["pk"]], OUT, api_name="pk_clear_query")
+        c["pk_items"].input(on_pk_pick, [c["pk_items"], c["pk"]] + ST_FORM, OUT, api_name="pk_pick")
+        c["pk_none"].click(on_pk_none, [c["pk"]] + ST_FORM, OUT, api_name="pk_none")
+        c["pk_cancel"].click(on_pk_cancel, [c["pk"]], OUT, api_name="pk_cancel")
+        mode_show_pairs = [("def_pick", "def_mode")] + [(f"o_pick{i}", f"o_mode{i}") for i in range(MAX_SLOTS)]
+        for name, mode in mode_show_pairs:
+            c[mode].input(partial(mode_show, name), [c[mode], c[name]], [c[f"{name}_show"]])
 
         c["slots"].input(on_slots, ST_FORM, OUT, api_name="slots")
-        dirty_triggers = [comp.input for n, comp in zip(FORM_NAMES, FORM) if n != "slots"]
+        dirty_triggers = [comp.input for n, comp in zip(FORM_NAMES, FORM) if n != "slots" and n not in STATE_FORM]
         gr.on(dirty_triggers, on_dirty, ST_FORM, OUT)
 
         c["add_btn"].click(partial(card_op, "add", 0), ST_FORM, OUT, api_name="card_add")

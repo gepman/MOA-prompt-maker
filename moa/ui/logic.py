@@ -21,6 +21,7 @@ from moa.core.folders import create_folder
 from moa.core.gen import GEN_PARAMS, clean_gen, normalize_value
 from moa.core.models import CompileResult, Issue, has_error
 from moa.core.scene_io import GenerationRecord
+from moa.core import picker
 from moa.core.tree import breadcrumb, list_folder
 
 # 共有ブラウザの選択先 → ルートフォルダ。savedir は「保存先フォルダ」を scenes/ 配下から選ぶモード
@@ -42,7 +43,7 @@ def new_sc() -> dict:
 
 def new_nav() -> dict:
     # cwd はルート名をキーに、data からの相対パスを持つ。save_dir は新規 Scene の保存先
-    return {"target": "scene", "slot": None, "cwd": {r: r for r in ROOTS}, "save_dir": "scenes"}
+    return {"target": "scene", "slot": None, "cwd": {r: r for r in ROOTS}, "save_dir": "scenes", "query": ""}
 
 
 # ---- Scene の組み立て ----
@@ -87,6 +88,13 @@ def target_label(nav: dict) -> str:
 def set_target(nav: dict, target: str, slot: str | None = None) -> dict:
     nav = copy.deepcopy(nav)
     nav["target"], nav["slot"] = target, slot
+    nav["query"] = ""
+    return nav
+
+
+def set_query(nav: dict, query: str | None) -> dict:
+    nav = copy.deepcopy(nav)
+    nav["query"] = (query or "").strip()
     return nav
 
 
@@ -125,6 +133,14 @@ def listing(repo: Repository, nav: dict) -> tuple[list[tuple[str, str]], str]:
     """(Radioの選択肢[(表示, 値)], パンくず文字列)。savedir のときはフォルダだけを並べる。"""
     root, cwd = _section_root(repo, nav), _cwd(repo, nav)
     choices: list[tuple[str, str]] = []
+    query = nav.get("query") or ""
+    if query and nav["target"] == "savedir":
+        return [], "保存先はフォルダ表示で選んでください（検索は使えません）"
+    if query:  # 検索中：ルート全体から平らに。クリックで選べる（値は file:<相対パス>）
+        rows, total = picker.search(repo, root, query)
+        for entry, where in rows:
+            choices.append((f"{picker.entity_label(entry)}　📁 {where}", "file:" + repo.rel(entry.path)))
+        return choices, f"🔍 検索：{query}（{picker.search_message(len(rows), total)}）"
     if cwd != root:
         choices.append(("⬆ 上へ", "up"))
     for it in list_folder(repo, cwd):
@@ -182,6 +198,7 @@ def _next_target(repo: Repository, sc: dict, nav: dict) -> dict:
     if slots:
         nav["target"] = "char"
         nav["slot"] = _first_empty_slot(repo, sc) or slots[0]
+        nav["query"] = ""
     return nav
 
 
