@@ -19,10 +19,12 @@ from moa.core.models import Issue
 from moa.ui import logic as L
 from moa.ui import quickedit as Q
 from moa.ui.dialogs import pick_folder
+from moa.ui.style import DEFAULT_PROMPT_FONT_PX, prompt_css
 
 
 def build_ui(repo: Repository,
-             comfy_loader: Callable[[], tuple[ComfyConfig | None, list[Issue]]] | None = None) -> gr.Blocks:
+             comfy_loader: Callable[[], tuple[ComfyConfig | None, list[Issue]]] | None = None,
+             prompt_font_px: int | float = DEFAULT_PROMPT_FONT_PX) -> gr.Blocks:
     comfy: dict = {"cfg": None, "issues": []}
 
     def reload_comfy() -> None:
@@ -44,7 +46,7 @@ def build_ui(repo: Repository,
             lo, hi, step = 0.0, 1.0, 0.05
         return {"minimum": lo, "maximum": hi, "step": step, "value": wf if wf is not None else lo}
 
-    with gr.Blocks(title="MOSS/Anima プロンプトビルダー") as demo:
+    with gr.Blocks(title="MOSS/Anima プロンプトビルダー", css=prompt_css(prompt_font_px)) as demo:
         sc = gr.State(L.new_sc())
         nav = gr.State(L.new_nav())
         gen = gr.State(None)  # 直近の生成結果のスナップショット（保存ボタンで Scene に記録する。再試行にも使う）
@@ -99,26 +101,35 @@ def build_ui(repo: Repository,
                 summary_md = gr.Markdown()
                 gr.Markdown("_下の4つの欄は直接編集できます（クイック編集）。編集は生成にだけ使われ、保存されません。"
                             "フォーカスを外すか［差分を更新］で反映します。_")
-                moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=True)
+                moss_tb = gr.Textbox(label="MOSS JSON", lines=16, max_lines=30, show_copy_button=True, interactive=True,
+                                     elem_classes=["moa-prompt"])
+                moss_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                 with gr.Row():
                     moss_st = gr.Markdown()
                     moss_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False, scale=0, min_width=200)
-                anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=True)
+                anima_tb = gr.Textbox(label="Animaプロンプト", lines=5, show_copy_button=True, interactive=True,
+                                      elem_classes=["moa-prompt"])
+                anima_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                 with gr.Row():
                     anima_st = gr.Markdown()
                     anima_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False, scale=0, min_width=200)
                 with gr.Row():
                     with gr.Column():
-                        negm_tb = gr.Textbox(label="ネガティブ（MOSS用）", lines=3, show_copy_button=True, interactive=True)
+                        negm_tb = gr.Textbox(label="ネガティブ（MOSS用）", lines=3, show_copy_button=True, interactive=True,
+                                             elem_classes=["moa-prompt"])
+                        negm_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                         negm_st = gr.Markdown()
                         negm_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
                     with gr.Column():
-                        nega_tb = gr.Textbox(label="ネガティブ（Anima用）", lines=3, show_copy_button=True, interactive=True)
+                        nega_tb = gr.Textbox(label="ネガティブ（Anima用）", lines=3, show_copy_button=True, interactive=True,
+                                             elem_classes=["moa-prompt"])
+                        nega_df = gr.HTML(visible=False, elem_classes=["moa-prompt"])
                         nega_st = gr.Markdown()
                         nega_rb = gr.Button("↩ コンパイル結果に戻す", size="sm", visible=False)
                 with gr.Accordion("クイック編集の差分（出どころ付き。コピーしてエディタで手直しする用）", open=True):
                     diff_btn = gr.Button("差分を更新", size="sm")
-                    diff_tb = gr.Textbox(label="差分", lines=6, max_lines=30, show_copy_button=True, interactive=False)
+                    diff_tb = gr.Textbox(label="差分", lines=6, max_lines=30, show_copy_button=True, interactive=False,
+                                         elem_classes=["moa-prompt"])
                 issues_md = gr.Markdown()
                 with gr.Accordion("データ読み込みの検証結果（data/ 全体）", open=False):
                     data_issues_md = gr.Markdown()
@@ -175,7 +186,8 @@ def build_ui(repo: Repository,
                     ext_over_btn = gr.Button("上書き保存", variant="stop", size="sm")
 
         NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md, query_tb]
-        QE_VIEW = [moss_st, anima_st, negm_st, nega_st, moss_rb, anima_rb, negm_rb, nega_rb, diff_tb]
+        QE_VIEW = [moss_st, anima_st, negm_st, nega_st, moss_rb, anima_rb, negm_rb, nega_rb, diff_tb,
+                   moss_df, anima_df, negm_df, nega_df]
         QE_OUT = [qe] + QE_VIEW
         QE_TB = dict(zip(Q.FIELDS, [moss_tb, anima_tb, negm_tb, nega_tb]))
         QE_RB = dict(zip(Q.FIELDS, [moss_rb, anima_rb, negm_rb, nega_rb]))
@@ -201,12 +213,13 @@ def build_ui(repo: Repository,
             return nav_part(nav_v, msg)
 
         def qe_part(qe_v, apply):
+            html = Q.field_diff_html(qe_v)   # 編集した欄のすぐ下の色付き差分。編集がなければ出さない
             return [qe_v] + Q.statuses(qe_v, apply) + [gr.update(visible=f in qe_v["edits"]) for f in Q.FIELDS] \
-                + [Q.diff_view(qe_v)]
+                + [Q.diff_view(qe_v)] + [gr.update(value=html[f], visible=bool(html[f])) for f in Q.FIELDS]
 
         def full(sc_old, sc_new, nav_v, qe_v, msg=None, sc_changed=True):
             if not sc_changed:  # フォルダ移動だけのときは、枠の描き直しとコンパイルを避ける
-                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 20
+                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 24
             r = L.compile_view(repo, sc_new)
             apply = sc_new["apply_negative"]
             note = "" if apply else "（未適用・参考表示）"

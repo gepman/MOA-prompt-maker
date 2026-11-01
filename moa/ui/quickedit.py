@@ -13,7 +13,8 @@ import json
 from dataclasses import replace
 
 from moa.core.models import CompileResult
-from moa.core.quickdiff import build_diff
+from moa.core.quickdiff import build_diff, field_rows
+from moa.ui.diffhtml import rows_to_html
 
 FIELDS = ("moss", "anima", "negm", "nega")
 FIELD_LABEL = {"moss": "MOSS JSON", "anima": "Anima", "negm": "ネガティブ（MOSS用）", "nega": "ネガティブ（Anima用）"}
@@ -104,6 +105,14 @@ def diff_view(qe: dict) -> str:
     if qe["discarded"]:
         parts.append(qe["discarded"])
     return "\n\n".join(parts)
+
+
+def field_diff_html(qe: dict) -> dict[str, str]:
+    """編集した欄の色付き差分（HTML）。編集していない欄は空文字（差分表示欄を出さない）。"""
+    r = qe["result"]
+    if r is None or not r.ok:
+        return {f: "" for f in FIELDS}
+    return {f: rows_to_html(field_rows(r, f, qe["edits"].get(f))) for f in FIELDS}
 
 
 # ---- 生成 ----

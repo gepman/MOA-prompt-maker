@@ -4,7 +4,7 @@ from pathlib import Path
 
 from moa.comfy import load_config
 from moa.core import Repository
-from moa.core.appconfig import config_port
+from moa.core.appconfig import config_port, config_prompt_font_size
 from moa.ui.app import build_ui
 
 
@@ -23,7 +23,8 @@ def main() -> None:
     repo = Repository(root)
     print(f"データ: {repo.root}  エラー {sum(i.level == 'error' for i in repo.issues)} 件")
     port = args.port if args.port is not None else config_port(args.config, "builder", 7860)
-    build_ui(repo, lambda: load_config(args.config, args.comfy_url)).launch(server_name=args.host, server_port=port)
+    font_px = config_prompt_font_size(args.config)
+    build_ui(repo, lambda: load_config(args.config, args.comfy_url), prompt_font_px=font_px).launch(server_name=args.host, server_port=port)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""クイック編集の差分（SPEC 10.1章）。difflib だけで作る。形式は固定（将来の (b)(c) が読むため）。
+"""クイック編集の差分（SPEC 10.1章）。difflib だけで作る。テキストの形式は固定（将来の (b)(c) が読むため）。
 
     === MOA quick-edit diff ===
     scene: <scene id> / action: <action id> / background: <background id>
@@ -10,13 +10,16 @@
     [MOSS] items[0].bbox
       [旧の4数値] → [新の4数値]        ← <出どころ>
     [Negative MOSS] / [Negative Anima]
+
+比較の結果は行の構造（Row）で持つ。固定形式のテキスト（`to_text`）と、画面の色付き表示（moa.ui.diffhtml）は
+同じ Row から作る（比較の処理は1つだけ）。
 """
 from __future__ import annotations
 
 import difflib
 import json
 import re
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 from .models import CompileResult
 from .sourcemap import Origin, SourceMap, line_paths
@@ -29,6 +32,30 @@ GENERATED_NOTE = "　※ エディタでは直せない。rating／extras／sex 
 BASE_NEGATIVE_NOTE = "　※ エディタでは直せない（全体ベースのネガティブ。アプリの定数）"
 CONTEXT_WORDS = 3
 ARROW = "   ← "
+FIELDS = ("anima", "moss", "negm", "nega")   # 差分テキストに並べる順
+
+
+@dataclass
+class Row:
+    """差分の1行。kind：head（見出し）/ del / ins（削除・追加）/ inline（単語差分）/ pair（旧 → 新）。"""
+    kind: str
+    text: str = ""                 # head / del / ins の本文。pair では旧
+    new: str = ""                  # pair の新
+    segs: list[tuple[str, str]] = field(default_factory=list)   # inline：("eq" | "del" | "ins", 文字列)
+    indent: str = ""
+    note: str = ""                 # 「   ← 出どころ」（コンパイラが付けた部分の注記を含む）
+
+
+def to_text(row: Row) -> str:
+    """固定形式の1行。"""
+    if row.kind == "head":
+        return row.text
+    if row.kind in ("del", "ins"):
+        return f"{row.indent}{'-' if row.kind == 'del' else '+'} {row.text}{row.note}"
+    if row.kind == "pair":
+        return f"{row.indent}{row.text} → {row.new}{row.note}"
+    mark = {"eq": "{}", "del": "[-{}-]", "ins": "{{+{}+}}"}
+    return row.indent + "".join(mark[op].format(t) for op, t in row.segs) + row.note
 
 
 def opcodes(a: list, b: list) -> list[tuple[str, int, int, int, int]]:
@@ -64,19 +91,19 @@ def note(origins: list[Origin | None]) -> str:
 
 
 # ---- タグ列（Anima・ネガティブ・meta）----
-def tag_lines(old: list[str], new: list[str], origins: list[Origin]) -> list[str]:
-    lines = []
+def tag_lines(old: list[str], new: list[str], origins: list[Origin]) -> list[Row]:
+    rows: list[Row] = []
     for tag, i1, i2, j1, j2 in opcodes(old, new):
         if tag == "equal":
             continue
         for i in range(i1, i2):
-            lines.append(f"- {old[i]}{note([origins[i] if i < len(origins) else None])}")
+            rows.append(Row("del", old[i], note=note([origins[i] if i < len(origins) else None])))
         if j2 > j1:
             # 追加の出どころは挿入位置の所有者（置き換えなら置き換えた位置のタグ、挿入なら直前のタグ。先頭なら直後）
             at = i1 if tag == "replace" else (i1 - 1 if i1 > 0 else 0)
             owner = origins[at] if 0 <= at < len(origins) else None
-            lines += [f"+ {new[j]}{note([owner])}" for j in range(j1, j2)]
-    return lines
+            rows += [Row("ins", new[j], note=note([owner])) for j in range(j1, j2)]
+    return rows
 
 
 # ---- 文字列フィールドの単語差分 ----
@@ -84,22 +111,23 @@ def _words(text: str) -> list[tuple[str, int, int]]:
     return [(m.group(), m.start(), m.end()) for m in re.finditer(r"\S+", text)]
 
 
-def word_diff(old: str, new: str, sm: SourceMap | None, path: tuple) -> tuple[str, list[Origin | None]]:
+def word_diff(old: str, new: str, sm: SourceMap | None, path: tuple) -> tuple[list[tuple[str, str]], list[Origin | None]]:
+    """(segs, 出どころ)。segs は ("eq" | "del" | "ins", 文字列) の並び。"""
     ow, nw = _words(old), _words(new)
     ops = [o for o in opcodes([w[0] for w in ow], [w[0] for w in nw]) if o[0] != "equal"]
     if not ops:   # 空白だけの違い
-        return f"[-{old}-]{{+{new}+}}", []
+        return [("del", old), ("ins", new)], []
     first, last = ops[0], ops[-1]
     start = max(first[1] - CONTEXT_WORDS, 0)
     end = min(last[2] + CONTEXT_WORDS, len(ow))
-    pieces: list[str] = []
+    pieces: list[list[tuple[str, str]]] = []   # 語、または変更（削除＋追加）のまとまり。間は半角スペース1つ
     origins: list[Origin | None] = []
     pos = start
     for _, i1, i2, j1, j2 in ops:
-        pieces += [w[0] for w in ow[pos:i1]]
+        pieces += [[("eq", w[0])] for w in ow[pos:i1]]
         deleted = " ".join(w[0] for w in ow[i1:i2])
         added = " ".join(w[0] for w in nw[j1:j2])
-        pieces.append((f"[-{deleted}-]" if deleted else "") + (f"{{+{added}+}}" if added else ""))
+        pieces.append(([("del", deleted)] if deleted else []) + ([("ins", added)] if added else []))
         if sm is not None:
             if i2 > i1:
                 origins.append(sm.moss_origin(path, ow[i1][1], ow[i2 - 1][2]))
@@ -107,8 +135,13 @@ def word_diff(old: str, new: str, sm: SourceMap | None, path: tuple) -> tuple[st
                 k = i1 - 1 if i1 > 0 else 0
                 origins.append(sm.moss_origin(path, ow[k][1], ow[k][2]) if ow else sm.moss_origin(path))
         pos = i2
-    pieces += [w[0] for w in ow[pos:end]]
-    return ("..." if start > 0 else "") + " ".join(pieces) + ("..." if end < len(ow) else ""), origins
+    pieces += [[("eq", w[0])] for w in ow[pos:end]]
+    segs: list[tuple[str, str]] = [("eq", "...")] if start > 0 else []
+    for n, piece in enumerate(pieces):
+        segs += ([("eq", " ")] if n else []) + piece
+    if end < len(ow):
+        segs.append(("eq", "..."))
+    return segs, origins
 
 
 # ---- MOSS（JSON の構造を辿る）----
@@ -134,15 +167,15 @@ def _origin_for(sm: SourceMap, path: tuple) -> Origin | None:
     return None
 
 
-def _moss_diff(old, new, path: tuple, sm: SourceMap, out: list[str]) -> None:
+def _moss_diff(old, new, path: tuple, sm: SourceMap, out: list[Row]) -> None:
     if old == new:
         return
     if isinstance(old, dict) and isinstance(new, dict):
         for k in list(old) + [k for k in new if k not in old]:
             if k not in new or k not in old:
-                out.append(f"[MOSS] {_name(path + (k,))}")
-                out.append(f"  {_compact(old[k]) if k in old else '(なし)'} → "
-                           f"{_compact(new[k]) if k in new else '(なし)'}{note([_origin_for(sm, path + (k,))])}")
+                out.append(Row("head", f"[MOSS] {_name(path + (k,))}"))
+                out.append(Row("pair", _compact(old[k]) if k in old else "(なし)", _compact(new[k]) if k in new else "(なし)",
+                               indent="  ", note=note([_origin_for(sm, path + (k,))])))
             else:
                 _moss_diff(old[k], new[k], path + (k,), sm, out)
     elif path == ("items",) and isinstance(old, list) and isinstance(new, list):
@@ -150,13 +183,14 @@ def _moss_diff(old, new, path: tuple, sm: SourceMap, out: list[str]) -> None:
     elif path[-1:] == ("meta",) and isinstance(old, list) and isinstance(new, list) \
             and all(isinstance(x, str) for x in old + new):
         origins = [_origin_for(sm, path + (i,)) for i in range(len(old))]
-        out.append(f"[MOSS] {_name(path)}")
-        out += ["  " + ln for ln in tag_lines(old, new, origins)]
+        out.append(Row("head", f"[MOSS] {_name(path)}"))
+        out += [replace(r, indent="  ") for r in tag_lines(old, new, origins)]
     elif isinstance(old, str) and isinstance(new, str):
-        text, origins = word_diff(old, new, sm, path)
-        out += [f"[MOSS] {_name(path)}", f"  {text}{note(origins)}"]
+        segs, origins = word_diff(old, new, sm, path)
+        out += [Row("head", f"[MOSS] {_name(path)}"), Row("inline", segs=segs, indent="  ", note=note(origins))]
     else:   # bbox などの数値・型違い：旧 → 新
-        out += [f"[MOSS] {_name(path)}", f"  {_compact(old)} → {_compact(new)}{note([_origin_for(sm, path)])}"]
+        out += [Row("head", f"[MOSS] {_name(path)}"),
+                Row("pair", _compact(old), _compact(new), indent="  ", note=note([_origin_for(sm, path)]))]
 
 
 def _item_origin(sm: SourceMap, i: int) -> Origin | None:
@@ -170,15 +204,16 @@ def _similar(a: str, b: str) -> bool:
     return m.real_quick_ratio() >= 0.6 and m.quick_ratio() >= 0.6 and m.ratio() >= 0.6
 
 
-def _items_diff(old: list, new: list, sm: SourceMap, out: list[str]) -> None:
+def _items_diff(old: list, new: list, sm: SourceMap, out: list[Row]) -> None:
     keys_old, keys_new = [_compact(x) for x in old], [_compact(x) for x in new]
 
     def removed(i):
-        out.extend([f"[MOSS] items[{i}]（item の削除）", f"  - {keys_old[i]}{note([_item_origin(sm, i)])}"])
+        out.extend([Row("head", f"[MOSS] items[{i}]（item の削除）"),
+                    Row("del", keys_old[i], indent="  ", note=note([_item_origin(sm, i)]))])
 
     def added(j, after):   # 追加の出どころは挿入位置の直前の item（先頭なら直後）
-        out.extend([f"[MOSS] items[{j}]（item の追加）",
-                    f"  + {keys_new[j]}{note([_item_origin(sm, after)] if old else [])}"])
+        out.extend([Row("head", f"[MOSS] items[{j}]（item の追加）"),
+                    Row("ins", keys_new[j], indent="  ", note=note([_item_origin(sm, after)] if old else []))])
 
     for tag, i1, i2, j1, j2 in opcodes(keys_old, keys_new):
         if tag == "equal":
@@ -201,8 +236,8 @@ def _items_diff(old: list, new: list, sm: SourceMap, out: list[str]) -> None:
             added(jj, max(i2 - 1, 0))
 
 
-def _line_diff(old_text: str, new_text: str, sm: SourceMap, old_json: dict, out: list[str]) -> None:
-    out.append("[MOSS]（JSON を解析できないため行単位）")
+def _line_diff(old_text: str, new_text: str, sm: SourceMap, old_json: dict, out: list[Row]) -> None:
+    out.append(Row("head", "[MOSS]（JSON を解析できないため行単位）"))
     old, new = old_text.splitlines(), new_text.splitlines()
     paths = line_paths(old_json)
 
@@ -212,13 +247,13 @@ def _line_diff(old_text: str, new_text: str, sm: SourceMap, old_json: dict, out:
     for tag, i1, i2, j1, j2 in opcodes(old, new):
         if tag == "equal":
             continue
-        out += [f"  - {old[i]}{note([origin(i)])}" for i in range(i1, i2)]
+        out += [Row("del", old[i], indent="  ", note=note([origin(i)])) for i in range(i1, i2)]
         at = i1 if tag == "replace" else max(i1 - 1, 0)
-        out += [f"  + {new[j]}{note([origin(at)])}" for j in range(j1, j2)]
+        out += [Row("ins", new[j], indent="  ", note=note([origin(at)])) for j in range(j1, j2)]
 
 
-def moss_lines(base: CompileResult, new_text: str) -> list[str]:
-    out: list[str] = []
+def moss_rows(base: CompileResult, new_text: str) -> list[Row]:
+    out: list[Row] = []
     old_json = json.loads(base.moss_prompt)
     try:
         new_json = json.loads(new_text)
@@ -229,7 +264,21 @@ def moss_lines(base: CompileResult, new_text: str) -> list[str]:
     return out
 
 
-# ---- 全体 ----
+# ---- 欄ごと／全体 ----
+def field_rows(base: CompileResult, fld: str, new: str | None) -> list[Row]:
+    """1つの欄（anima / moss / negm / nega）の差分の行。編集していなければ空。"""
+    sm = base.sources
+    current = {"anima": base.anima_prompt, "moss": base.moss_prompt,
+               "negm": base.negative_moss, "nega": base.negative_anima}[fld]
+    if new is None or new == current:
+        return []
+    if fld == "moss":
+        return moss_rows(base, new)
+    title, origins = {"anima": ("[Anima]", sm.anima), "negm": ("[Negative MOSS]", sm.negative_moss),
+                      "nega": ("[Negative Anima]", sm.negative_anima)}[fld]
+    return [Row("head", title)] + tag_lines(split_tags(current), split_tags(new), origins)
+
+
 def build_diff(base: CompileResult, edited: dict[str, str], scene_label: str | None, discarded: bool = False) -> str:
     """base＝コンパイル結果、edited＝編集後の文字列（キー moss / anima / negm / nega。編集していない欄は省略か同じ値）。
 
@@ -237,18 +286,5 @@ def build_diff(base: CompileResult, edited: dict[str, str], scene_label: str | N
     """
     lines = ([DISCARDED] if discarded else []) + [
         HEADER, f"scene: {scene_label or UNSAVED} / action: {base.action_id} / background: {base.background_id}"]
-    sm = base.sources
-    body: list[str] = []
-
-    new = edited.get("anima")
-    if new is not None and new != base.anima_prompt:
-        body += ["[Anima]"] + tag_lines(split_tags(base.anima_prompt), split_tags(new), sm.anima)
-    new = edited.get("moss")
-    if new is not None and new != base.moss_prompt:
-        body += moss_lines(base, new)
-    for key, title, old, origins in (("negm", "[Negative MOSS]", base.negative_moss, sm.negative_moss),
-                                     ("nega", "[Negative Anima]", base.negative_anima, sm.negative_anima)):
-        new = edited.get(key)
-        if new is not None and new != old:
-            body += [title] + tag_lines(split_tags(old), split_tags(new), origins)
+    body = [to_text(r) for f in FIELDS for r in field_rows(base, f, edited.get(f))]
     return "\n".join(lines + (body or ["(差分なし)"]))

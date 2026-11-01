@@ -1,6 +1,7 @@
 # 画面のポート（起動オプション --port が優先）。7861 / 7862 は Forge Neo が使うので使わない
 builder:
   port: 7860                          # app.py（ビルダー）
+  promptFontSize: 16                  # プロンプト欄・差分欄の文字サイズ（px。8〜48。既定 16）
 editor:
   port: 7863                          # editor.py（エディタ）
 
