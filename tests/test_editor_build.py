@@ -30,14 +30,16 @@ class Driver:
     def __setitem__(self, name, value):
         self.cur[id(self.c[name])] = value
 
-    def call(self, api, *lead):
-        """lead は先頭の入力（Radio の選択値など）。残りは現在値。"""
+    def call(self, api, *lead, **kw):
+        """lead は先頭の入力（Radio の選択値など）。残りは現在値。kw は gr.Request など、画面の部品ではない引数（request=…）。"""
         fn = self.fns[api]
         args = list(lead) + [self.cur[id(comp)] for comp in fn.inputs[len(lead):]]
-        out = fn.fn(*args)
+        out = fn.fn(*args, **kw)
         check_output_shape(self.demo, fn, out)   # 個数が合わなければここで ValueError
         if out == gr.skip():   # 単独の gr.skip() は、全部の出力を「更新なし」にする
             out = {}
+        elif isinstance(out, (list, tuple)):   # リストで返すハンドラーは、outputs の順に部品へ対応づける（skip は更新なし）
+            out = {comp: upd for comp, upd in zip(fn.outputs, out) if upd != gr.skip()}
         self.last = {}
         for comp, upd in (out or {}).items():
             self.last[id(comp)] = upd

@@ -5,12 +5,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+MISSING_REF = "missing_ref"
+
+
 @dataclass(frozen=True)
 class Issue:
     level: str  # "error" | "warning"
     message: str
     path: Path | None = None
     field: str | None = None  # 項目のパス（例 mossItems[2].bbox、outfits.left）。エディタの一覧表示用
+    code: str | None = None   # 種類の印。MISSING_REF は「参照先が存在しない」（インポートでは警告に落とす。15.10章）
 
     def __str__(self) -> str:
         where = f" [{self.path.name}]" if self.path else ""

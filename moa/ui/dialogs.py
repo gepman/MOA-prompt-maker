@@ -9,14 +9,14 @@ from tkinter import filedialog
 root = tkinter.Tk()
 root.withdraw()
 root.attributes('-topmost', True)
-path = filedialog.askdirectory(title='生成画像のコピー先フォルダ', initialdir=sys.argv[1] or None, mustexist=False)
+path = filedialog.askdirectory(title=sys.argv[2], initialdir=sys.argv[1] or None, mustexist=False)
 sys.stdout.buffer.write(path.encode('utf-8'))
 """
 
 
-def pick_folder(initial: str = "") -> str | None:
+def pick_folder(initial: str = "", title: str = "生成画像のコピー先フォルダ") -> str | None:
     """選ばれたフォルダのパス。キャンセルなら None。"""
-    proc = subprocess.run([sys.executable, "-c", _CODE, initial or ""],
+    proc = subprocess.run([sys.executable, "-c", _CODE, initial or "", title],
                           capture_output=True, timeout=600)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip() or "フォルダ選択ダイアログを開けませんでした")

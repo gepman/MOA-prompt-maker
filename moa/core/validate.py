@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from .bbox import check_inversion, check_overflow
 from .constants import ANY_BRACES_RE, NONE, PLACEHOLDER_RE
-from .models import Action, Background, Character, Issue, Scene
+from .models import MISSING_REF, Action, Background, Character, Issue, Scene
 from .people import strip_template_count_tags
 from .resolve import resolve_outfit
 
@@ -42,7 +42,7 @@ def validate_character(repo: "Repository", char: Character) -> list[Issue]:
     path = repo.path_of("character", char.id)
     d = char.default_outfit
     if d and d != NONE and repo.outfit(d) is None:
-        return [Issue("error", f"defaultOutfit '{d}' が存在しません", path, "defaultOutfit")]
+        return [Issue("error", f"defaultOutfit '{d}' が存在しません", path, "defaultOutfit", MISSING_REF)]
     return []
 
 
@@ -90,7 +90,8 @@ def validate_action(repo: "Repository", action: Action) -> list[Issue]:
         if slot not in action.slots:
             issues.append(Issue("error", f"{who} の outfits に宣言されていないスロット '{slot}' があります", path, f"outfits.{slot}"))
         if value != NONE and repo.outfit(value) is None:
-            issues.append(Issue("error", f"{who} の outfits[{slot}] の服装 '{value}' が存在しません", path, f"outfits.{slot}"))
+            issues.append(Issue("error", f"{who} の outfits[{slot}] の服装 '{value}' が存在しません", path, f"outfits.{slot}",
+                                MISSING_REF))
 
     if action.background and repo.background(action.background) is None:
         issues.append(Issue("warning", f"{who} の推奨背景 '{action.background}' が存在しません", path, "background"))
@@ -105,10 +106,10 @@ def validate_scene(repo: "Repository", scene: Scene) -> list[Issue]:
     path = repo.path_of("scene", scene.id)
     issues: list[Issue] = []
     if repo.background(scene.background) is None:
-        issues.append(Issue("error", f"Background '{scene.background}' が存在しません", path))
+        issues.append(Issue("error", f"Background '{scene.background}' が存在しません", path, None, MISSING_REF))
     action = repo.action(scene.action)
     if action is None:
-        issues.append(Issue("error", f"Action '{scene.action}' が存在しません", path))
+        issues.append(Issue("error", f"Action '{scene.action}' が存在しません", path, None, MISSING_REF))
         return issues
 
     for slot in scene.cast:
@@ -121,14 +122,15 @@ def validate_scene(repo: "Repository", scene: Scene) -> list[Issue]:
     for slot, entry in scene.cast.items():
         char = repo.character(entry.character)
         if char is None:
-            issues.append(Issue("error", f"スロット '{slot}' のキャラクター '{entry.character}' が存在しません", path))
+            issues.append(Issue("error", f"スロット '{slot}' のキャラクター '{entry.character}' が存在しません", path, None,
+                                MISSING_REF))
             continue
         if entry.outfit not in (None, NONE) and repo.outfit(entry.outfit) is None:
-            issues.append(Issue("error", f"スロット '{slot}' の服装 '{entry.outfit}' が存在しません", path))
+            issues.append(Issue("error", f"スロット '{slot}' の服装 '{entry.outfit}' が存在しません", path, None, MISSING_REF))
             continue
         res = resolve_outfit(slot, entry.outfit, action.outfits, char.default_outfit)
         if res.outfit_id and repo.outfit(res.outfit_id) is None:
-            issues.append(Issue("error", f"スロット '{slot}' の服装 '{res.outfit_id}' が存在しません", path))
+            issues.append(Issue("error", f"スロット '{slot}' の服装 '{res.outfit_id}' が存在しません", path, None, MISSING_REF))
     return issues
 
 

@@ -7,15 +7,22 @@
   cwd    … 今いるフォルダ（data からの相対パス）
   query  … 名前検索の文字列（空ならフォルダ表示）
   last   … ルート名ごとに前回開いていたフォルダ
+
+フォルダ選択モード（インポートの取り込み先。EDITOR_SPEC 15.5章）：target が `imp_<種類>` のとき、項目ではなくフォルダを選ぶ
+（項目欄を隠し、［このフォルダを選ぶ］で今いるフォルダを選ぶ）。種類には Scene も含む（ルートは ROOTS から）。
 """
 from __future__ import annotations
 
 import copy
 
 from moa.core import picker as core
-from moa.core.repository import Repository
+from moa.core.constants import ROOTS
+from moa.core.repository import KINDS, Repository
 
-from .session import SECTIONS
+# 種類 → ルート名（Scene を含む）
+ROOT_DIR = {kind: root for root, kind in ROOTS.items()}
+FOLDER_PREFIX = "imp_"
+IMPORT_LABEL = {"character": "キャラ", "outfit": "服装", "background": "背景", "action": "行為", "scene": "Scene"}
 
 # 欄の名前 → (種類, 表示名, 空にできるか)。o0〜o7 は Action のスロット別 outfits
 TARGETS: dict[str, tuple[str, str, bool]] = {
@@ -25,6 +32,7 @@ TARGETS: dict[str, tuple[str, str, bool]] = {
     "pv_char": ("character", "プレビューのキャラ", True),
     "pv_bg": ("background", "プレビューの Background", True),
     **{f"o{i}": ("outfit", f"outfits.slot{i}", False) for i in range(8)},
+    **{f"{FOLDER_PREFIX}{k}": (k, f"取り込み先のフォルダ（{IMPORT_LABEL[k]}）", False) for k in KINDS},
 }
 EMPTY_TEXT = {"act_bg": "（未設定）", "pv_act": "（自動）", "pv_char": "（自動）", "pv_bg": "（自動）"}
 EMPTY_BUTTON = {"act_bg": "未設定にする", "pv_act": "自動にする", "pv_char": "自動にする", "pv_bg": "自動にする"}
@@ -34,8 +42,12 @@ def new_pk() -> dict:
     return {"target": None, "label": "", "kind": None, "cwd": "", "query": "", "last": {}}
 
 
+def is_folder_mode(pk: dict) -> bool:
+    return bool(pk["target"] and pk["target"].startswith(FOLDER_PREFIX))
+
+
 def _root(repo: Repository, pk: dict):
-    return (repo.root / SECTIONS[pk["kind"]]).resolve()
+    return (repo.root / ROOT_DIR[pk["kind"]]).resolve()
 
 
 def open_picker(repo: Repository, pk: dict, target: str, current_id: str | None, label: str | None = None) -> dict:
@@ -44,7 +56,11 @@ def open_picker(repo: Repository, pk: dict, target: str, current_id: str | None,
     pk = copy.deepcopy(pk)
     pk.update({"target": target, "kind": kind, "label": label or default_label, "query": ""})
     root = _root(repo, pk)
-    pk["cwd"] = repo.rel(core.initial_folder(repo, root, current_id, kind, pk["last"].get(SECTIONS[kind])))
+    if is_folder_mode(pk):   # current_id は、今選んでいる取り込み先のフォルダ（data からの相対パス）。無ければ前回、ルート
+        rel = current_id or pk["last"].get(ROOT_DIR[kind])
+        pk["cwd"] = repo.rel(core.clamp_folder(root, repo.root / rel if rel else None))
+    else:
+        pk["cwd"] = repo.rel(core.initial_folder(repo, root, current_id, kind, pk["last"].get(ROOT_DIR[kind])))
     return pk
 
 
@@ -62,13 +78,13 @@ def enter(repo: Repository, pk: dict, rel: str | None) -> dict:
     root = _root(repo, pk)
     pk["cwd"] = repo.rel(core.clamp_folder(root, repo.root / rel))
     pk["query"] = ""
-    pk["last"][SECTIONS[pk["kind"]]] = pk["cwd"]
+    pk["last"][ROOT_DIR[pk["kind"]]] = pk["cwd"]
     return pk
 
 
 def set_query(pk: dict, query: str | None) -> dict:
     pk = copy.deepcopy(pk)
-    pk["query"] = (query or "").strip()
+    pk["query"] = "" if is_folder_mode(pk) else (query or "").strip()   # フォルダ選択モードでは検索しない
     return pk
 
 
@@ -78,7 +94,7 @@ def pick(repo: Repository, pk: dict, entity_id: str) -> dict:
     entry = repo.entry(pk["kind"], entity_id)
     if entry is not None:
         root = _root(repo, pk)
-        pk["last"][SECTIONS[pk["kind"]]] = repo.rel(core.clamp_folder(root, entry.path.parent))
+        pk["last"][ROOT_DIR[pk["kind"]]] = repo.rel(core.clamp_folder(root, entry.path.parent))
     return close(pk)
 
 
@@ -87,12 +103,15 @@ def view(repo: Repository, pk: dict) -> dict:
     target = pk["target"]
     if target is None:
         return {"target_md": "", "crumbs": [], "dirs": [], "items": [], "msg": "", "cwd": None,
-                "can_clear": False, "clear_text": ""}
+                "can_clear": False, "clear_text": "", "folder_mode": False}
     root = _root(repo, pk)
     cwd = core.clamp_folder(root, repo.root / pk["cwd"] if pk["cwd"] else None)
     fv = core.folder_view(repo, root, cwd)
     out = {"target_md": f"**選択先：{pk['label']}**", "crumbs": fv.crumbs, "cwd": repo.rel(cwd),
-           "can_clear": TARGETS[target][2], "clear_text": EMPTY_BUTTON.get(target, "")}
+           "can_clear": TARGETS[target][2], "clear_text": EMPTY_BUTTON.get(target, ""), "folder_mode": False}
+    if is_folder_mode(pk):   # フォルダ選択モード：項目は出さず、今いるフォルダを選ばせる
+        return out | {"dirs": fv.folders, "items": [], "folder_mode": True,
+                      "msg": f"取り込み先にするフォルダを開いて、［このフォルダを選ぶ］を押してください（今：`{repo.rel(cwd)}`）"}
     if pk["query"]:
         rows, total = core.search(repo, root, pk["query"])
         out |= {"dirs": [], "items": [(f"{core.entity_label(e)}　📁 {where}", e.id) for e, where in rows],

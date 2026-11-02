@@ -69,6 +69,19 @@ def validate_draft(repo: Repository, kind: str, values: dict, *, new: bool, orig
 
     obj = to_obj(kind, {**v, "id": eid or DRAFT_ID})
     ov = OverlayRepository(repo, {(kind, obj.id): obj})
+    issues += object_issues(ov, kind, obj)
+    if kind == "action" and not new and original_id:
+        issues += slot_issues(repo, original_id, obj.slots)
+    return issues
+
+
+def object_issues(ov, kind: str, obj) -> list[Issue]:
+    """オブジェクトができたあとの、種類別の意味チェック（EDITOR_SPEC 1章の表）。
+
+    ov は、検証したいオブジェクトを含む Repository の見え方（OverlayRepository など）。
+    保存時の検証（validate_draft）と、インポート（15章）が同じ関数を使う。Scene の検証は moa.core.validate にある。
+    """
+    issues: list[Issue] = []
     if kind == "character":
         issues += validate_character(ov, obj)
     elif kind == "background":
@@ -81,6 +94,4 @@ def validate_draft(repo: Repository, kind: str, values: dict, *, new: bool, orig
         bg = ov.background(obj.background) if obj.background else None
         canvas = bg.canvas if bg is not None else DEFAULT_CANVAS
         issues += check_overflow(obj.moss_items, canvas, f"Action '{obj.id}'", None)
-        if not new and original_id:
-            issues += slot_issues(repo, original_id, obj.slots)
     return issues

@@ -24,6 +24,7 @@ from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
                                    save_draft, save_folder)
 from moa.editor.logic.validation import validate_draft
+from moa.editor.ui.import_ui import build_import_section, wire_import
 from moa.ui.style import DEFAULT_PROMPT_FONT_PX, JUMP_JS, TEXTBOX_ID, prompt_css
 
 MAX_SLOTS = 8
@@ -230,6 +231,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 R("pv_img", gr.Image(label="bbox プレビュー図（背景＝青、行為＝橙、はみ出し＝赤）", type="pil",
                                      interactive=False))
 
+        imp = build_import_section()   # インポート（15章）。3カラムの下に全幅で置く
+
         # ---- 共通ピッカー（右サイドバー）----
         R("pk", gr.State(PK.new_pk()))
         with gr.Sidebar(position="right", open=False, width=420) as pk_bar:
@@ -245,6 +248,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 R("pk_dirs", gr.Radio(choices=[], value=None, label="フォルダ", scale=1))
                 R("pk_items", gr.Radio(choices=[], value=None, label="項目（名前（ID））", scale=2))
             R("pk_none", gr.Button("空にする", size="sm", visible=False))
+            R("pk_here", gr.Button("このフォルダを選ぶ", variant="primary", visible=False))   # フォルダ選択モード（インポートの取り込み先）
             R("pk_cancel", gr.Button("キャンセル"))
         R("pk_bar", pk_bar)
 
@@ -537,14 +541,15 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             """ピッカーの画面（開閉・パンくず・フォルダ・項目・検索欄）。"""
             v = PK.view(repo, pk_v)
             show_dirs = bool(v["dirs"])
-            show_items = bool(v["items"]) or not show_dirs   # フォルダだけ／項目だけのときは、あるほうを全幅にする
+            show_items = (bool(v["items"]) or not show_dirs) and not v["folder_mode"]   # フォルダだけ／項目だけのときは、あるほうを全幅にする
             return {c["pk"]: pk_v, c["pk_bar"]: gr.update(open=pk_v["target"] is not None),
                     c["pk_target"]: v["target_md"], c["pk_crumbs"]: gr.update(choices=v["crumbs"], value=v["cwd"]),
                     c["pk_dirs"]: gr.update(choices=v["dirs"], value=None, visible=show_dirs),
                     c["pk_items"]: gr.update(choices=v["items"], value=None, visible=show_items),
                     c["pk_msg"]: v["msg"],
                     c["pk_q"]: pk_v["query"],
-                    c["pk_none"]: gr.update(visible=v["can_clear"], value=v["clear_text"] or "空にする")}
+                    c["pk_none"]: gr.update(visible=v["can_clear"], value=v["clear_text"] or "空にする"),
+                    c["pk_here"]: gr.update(visible=v["folder_mode"])}
 
         def on_open(target, pk_v, cur, slots_text):
             label = None
@@ -785,5 +790,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
 
         demo.load(on_load, [c["st"]], OUT, api_name="init")
 
-    demo.named = c   # 名前 → 部品（テストが画面を操作するときに使う）
+        wire_import(demo, repo, imp, c, OUT, pk_part, tree_part)   # インポート（15章）
+
+    demo.named = {**c, **{f"imp_{k}": v for k, v in imp.items()}}   # 名前 → 部品（テストが画面を操作するときに使う。インポートは imp_ 付き）
     return demo
