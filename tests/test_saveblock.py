@@ -99,6 +99,40 @@ def test_a_saved_scene_becomes_the_opened_one_so_the_next_folder_is_where_it_was
     assert sv2["cwd"] == "scenes/新作"
 
 
+def test_after_a_save_the_default_folder_is_the_last_saved_folder_even_if_another_scene_is_opened(data_dir):
+    repo = move_scene(data_dir, TRIO, "pokemon")
+    sc, nav = open_scene(repo, folder="pokemon")
+    sv, _ = synced(repo, sc)
+    assert sv["cwd"] == "scenes/pokemon" and sv["last_saved"] is None               # セッションの最初：開いている Scene のフォルダ
+
+    assert SB.make_folder(repo, sv, "新作").startswith("📁")
+    sc_saved, msg = L.save(repo, sc, L.SaveTarget("beach_chat__fresh", folder=data_dir / "scenes" / "新作"), "")
+    assert msg.startswith("💾")
+    sv = SB.note_saved(repo, sv, repo.path_of("scene", sc_saved["scene_id"]))
+    assert sv["last_saved"] == "scenes/新作"
+
+    other, _ = pick(repo, sc_saved, nav, "scene", f"file:scenes/{ELESA}.yaml")      # scenes/ 直下の別の Scene を開く
+    sv2, _ = synced(repo, other, sv)
+    assert sv2["cwd"] == "scenes/新作"                                               # その後：最後に保存したフォルダ（開いた Scene のフォルダではない）
+
+    draft, _ = new_draft(repo)                                                       # 新規作成に切り替えても同じ
+    assert synced(repo, draft, sv2)[0]["cwd"] == "scenes/新作"
+
+    fresh, _ = synced(repo, other)                                                   # セッションが切れる（新しい状態）とリセット
+    assert fresh["cwd"] == "scenes" and fresh["last_saved"] is None
+
+
+def test_an_overwrite_also_updates_the_last_saved_folder_and_a_failed_save_does_not(repo, data_dir):
+    repo = move_scene(data_dir, TRIO, "pokemon")
+    sc, _ = open_scene(repo, folder="pokemon")
+    sv, _ = synced(repo, sc)
+    sc2, msg = L.save(repo, sc, SB.overwrite_target(repo, sc), "")
+    assert msg.startswith("💾")
+    sv = SB.note_saved(repo, sv, repo.path_of("scene", sc2["scene_id"]))
+    assert sv["last_saved"] == "scenes/pokemon"
+    assert SB.note_saved(repo, sv, None) == sv                                       # 保存できなかったとき（パスなし）は変えない
+
+
 # ---- id の初期値 ----
 def test_the_default_id_is_copy_for_an_opened_scene_and_default_for_a_new_one(repo):
     sc, _ = open_scene(repo)

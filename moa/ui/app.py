@@ -345,6 +345,8 @@ def build_ui(repo: Repository,
                               effective=effective_of(gp_v), force=force)
             external = msg.startswith(L.EXTERNAL_PREFIX)
             sv2 = SB.set_pending(sv_v, SB.pack(repo, target, "external") if external else None)
+            if msg.startswith("💾"):   # 保存できたら、そのフォルダを「最後に保存したフォルダ」にする（次の初期フォルダ）
+                sv2 = SB.note_saved(repo, sv2, repo.path_of("scene", sc2["scene_id"]))
             return full(sc_v, sc2, nav_v, qe_v) + [msg, data_issues_text(), gr.update(visible=external), sv2]
 
         def on_save_over(sc_v, nav_v, sv_v, slug, name, gen_v, gp_v, qe_v):

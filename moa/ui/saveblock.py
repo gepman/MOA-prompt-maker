@@ -4,7 +4,8 @@
 
   sv = {"key": 初期値を作り直す条件（開き直し・Action の切り替え）,
         "cwd": 今表示しているフォルダ（data からの相対パス。scenes/ からはみ出さない）,
-        "last_dir": このタブで直前に開いた／保存した Scene のフォルダ（ファイルには書かない）,
+        "last_saved": このセッションで最後に保存したフォルダ（ファイルには書かない。セッションが切れるとリセット）,
+        "last_dir": このセッションで直前に開いた Scene のフォルダ（同上）,
         "selected": 一覧で選んだ既存 Scene のパス（別名保存で、そのファイルだけ上書きを許すため）,
         "pending": 確認待ち（上書きの確認）か、外部変更で止まった保存}
 """
@@ -20,7 +21,7 @@ from moa.ui.logic import SaveTarget
 
 
 def new_sv() -> dict:
-    return {"key": None, "cwd": "scenes", "last_dir": None, "selected": None, "pending": None}
+    return {"key": None, "cwd": "scenes", "last_saved": None, "last_dir": None, "selected": None, "pending": None}
 
 
 def scenes_root(repo: Repository) -> Path:
@@ -86,11 +87,22 @@ def sync(repo: Repository, sv: dict, sc: dict) -> tuple[dict, str | None]:
     if opened is not None:
         sv["last_dir"] = repo.rel(opened.parent)
     if old.get("folder") != folder_key:
-        sv["cwd"] = repo.rel(opened.parent) if opened is not None else (sv["last_dir"] or "scenes")
+        # 保存先フォルダの初期値：このセッションで保存済みなら最後に保存したフォルダ。まだなら開いている Scene のフォルダ
+        # （開いていなければ直前に開いた Scene のフォルダ）。どれも無ければ scenes/ 直下
+        sv["cwd"] = (sv["last_saved"] or (repo.rel(opened.parent) if opened is not None else sv["last_dir"]) or "scenes")
         sv["selected"], sv["pending"] = None, None
     new_id = default_scene_id(repo, sc) if old.get("id") != id_key else None
     sv["key"] = {"folder": folder_key, "id": id_key}
     return sv, new_id
+
+
+def note_saved(repo: Repository, sv: dict, path: Path | None) -> dict:
+    """保存に成功したら、そのファイルのフォルダを「最後に保存したフォルダ」として覚える（次の初期フォルダになる）。"""
+    if path is None:
+        return sv
+    sv = copy.deepcopy(sv)
+    sv["last_saved"] = repo.rel(Path(path).parent)
+    return sv
 
 
 # ---- 一覧（フォルダ・Scene）----
