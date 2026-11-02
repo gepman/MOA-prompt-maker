@@ -1,4 +1,8 @@
 """エディタの画面の組み立て（イベント配線を含む）が例外なく通ること。"""
+import gradio as gr
+
+from conftest import check_output_shape
+from moa.core.repository import load_yaml
 from moa.editor.ui.app import build_editor
 
 
@@ -7,9 +11,14 @@ def test_editor_builds(repo):
 
 
 class Driver:
-    """Gradio のイベントを、ブラウザなしで api_name から呼ぶ（入力は部品の現在値を持ち回る）。"""
+    """Gradio のイベントを、ブラウザなしで api_name から呼ぶ（入力は部品の現在値を持ち回る）。
+
+    ハンドラーの返り値は、Gradio の出力検証（個数・部品の対応）に通す。
+    空の dict を返して「出力の個数が足りない」になる不具合を、ここで見逃さないため。
+    """
 
     def __init__(self, demo):
+        self.demo = demo
         self.c = demo.named
         self.fns = {f.api_name: f for f in demo.fns.values() if f.api_name}
         self.cur = {id(comp): comp.value for comp in demo.blocks.values() if hasattr(comp, "value")}
@@ -26,6 +35,9 @@ class Driver:
         fn = self.fns[api]
         args = list(lead) + [self.cur[id(comp)] for comp in fn.inputs[len(lead):]]
         out = fn.fn(*args)
+        check_output_shape(self.demo, fn, out)   # 個数が合わなければここで ValueError
+        if out == gr.skip():   # 単独の gr.skip() は、全部の出力を「更新なし」にする
+            out = {}
         self.last = {}
         for comp, upd in (out or {}).items():
             self.last[id(comp)] = upd
@@ -99,6 +111,40 @@ def test_editor_flow_new_and_folder(repo, data_dir):
     d["id"], d["name"], d["moss"], d["anima"] = "fresh_char", "新キャラ", "m", "a"
     d.call("save")
     assert (data_dir / "characters" / "fresh_char.yaml").exists() and d["st"]["mode"] == "edit"
+
+
+def test_editor_flow_folder_meta_check_preview_and_save(repo, data_dir):
+    """フォルダ（_folder.yaml）の編集：検証・プレビュー・保存が例外なく動く。
+
+    以前は、フォルダモードの［検証］が空の dict を返し、「output values（needed: 257, returned: 1）」で落ちた。
+    """
+    d = Driver(build_editor(repo))
+    d.call("init")
+    d.call("mkdir", "ポケモン", d["st"])
+    d.call("browse", "dir:characters/ポケモン")
+    assert d["st"]["mode"] == "folder"
+    d["f_name"], d["f_order"] = "ポケモン", "nothing.yaml"
+
+    d["issues"] = "- ❌ 前の項目のエラー"
+    d.call("check")
+    assert d["issues"] == ""                                         # フォルダの検証では、前の項目のエラー表示が残らない
+    d.call("preview")                                                # フォルダにプレビューはない（何も変えずに終わる）
+    d.call("save")
+    assert "保存しました" in d["save_msg"] and "nothing.yaml" in d["issues"]   # order の警告は保存の結果に出る
+    assert load_yaml(data_dir / "characters" / "ポケモン" / "_folder.yaml")["name"] == "ポケモン"
+    d.call("check")                                                  # 保存の後に、もう一度検証しても落ちない
+    assert d["issues"] == ""
+
+
+def test_editor_events_with_nothing_to_update_do_not_raise(repo):
+    """何も開いていない・ピッカーも閉じている状態で押せるイベントが、更新なしで終わる（gr.skip()）。"""
+    d = Driver(build_editor(repo))
+    d.call("init")
+    for api in ("check", "preview", "pv_use", "pk_none", "pk_search", "pk_clear_query"):
+        d.call(api)
+    d.call("browse", None)
+    d.call("pk_dir", None)
+    d.call("pk_pick", None)
 
 
 def _summer_outfits(data_dir):

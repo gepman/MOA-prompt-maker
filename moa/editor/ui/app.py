@@ -2,6 +2,8 @@
 
 方針（CLAUDE.md）：個数が変わる部品（mossItems のカード、スロットごとの服装）は最大数を最初から用意して表示／非表示を切り替える。
 キー入力ごとの再コンパイル・再描画はしない。ハンドラーは {部品: 値} の dict を返し、全部品を outputs に並べる。
+更新するものが無いときは、`{}` ではなく `gr.skip()` を返す（空の dict は Gradio が1個の値として数えるので、
+「didn't return enough output values」で落ちる。tests/test_ui_outputs.py が機械的に確かめる）。
 """
 from __future__ import annotations
 
@@ -505,7 +507,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
 
         def on_browse(choice, st_v, n, *args):
             if not choice:
-                return {}
+                return gr.skip()
             kind, _, rel = choice.partition(":")
             action = {"action": "up"} if choice == "up" else {"action": kind, "rel": rel}
             return navigate(action, st_v, n, *args)
@@ -553,13 +555,13 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             return pk_part(PK.open_picker(repo, pk_v, target, cur or None, label))
 
         def on_pk_enter(rel, pk_v):
-            return pk_part(PK.enter(repo, pk_v, rel)) if rel else {}
+            return pk_part(PK.enter(repo, pk_v, rel)) if rel else gr.skip()
 
         def on_pk_search(q, pk_v):
-            return pk_part(PK.set_query(pk_v, q)) if pk_v["target"] else {}
+            return pk_part(PK.set_query(pk_v, q)) if pk_v["target"] else gr.skip()
 
         def on_pk_clear_query(pk_v):
-            return pk_part(PK.set_query(pk_v, "")) if pk_v["target"] else {}
+            return pk_part(PK.set_query(pk_v, "")) if pk_v["target"] else gr.skip()
 
         def on_pk_cancel(pk_v):
             return pk_part(PK.close(pk_v))
@@ -568,7 +570,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             """ピッカーで選んだ値（entity_id。None は空にする）を欄に入れて、ピッカーを閉じる。"""
             t = pk_v["target"]
             if t is None:
-                return {}
+                return gr.skip()
             kind = PK.TARGETS[t][0]
             out = pk_part(PK.pick(repo, pk_v, entity_id) if entity_id else PK.close(pk_v))
             name = TARGET_STATE[t]
@@ -587,7 +589,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             return out
 
         def on_pk_pick(entity_id, pk_v, st_v, n, *args):
-            return apply_pick(pk_v, st_v, n, args, entity_id) if entity_id else {}
+            return apply_pick(pk_v, st_v, n, args, entity_id) if entity_id else gr.skip()
 
         def on_pk_none(pk_v, st_v, n, *args):
             return apply_pick(pk_v, st_v, n, args, None)
@@ -640,15 +642,17 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
         # 検証・保存
         def on_check(st_v, n, *args):
             v = current(st_v, n, args)
-            if v is None or st_v["mode"] == "folder":
-                return {}
+            if v is None:
+                return gr.skip()
+            if st_v["mode"] == "folder":   # フォルダに検証する項目はない。前の項目のエラー表示が残らないよう、欄を空にする
+                return {c["issues"]: ""}
             return {c["issues"]: issue_lines(validate_draft(repo, st_v["kind"], v, new=st_v["mode"] != "edit",
                                                             original_id=st_v["id"]))}
 
         def do_save(confirmed: bool, force: bool, st_v, n, cow_id, *args):
             v = current(st_v, n, args)
             if v is None:
-                return {}
+                return gr.skip()
             out = hide_boxes()
             if st_v["mode"] == "folder":
                 res = save_folder(repo, st_v, v, force=force)
@@ -696,13 +700,13 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             for name, kind in (("pv_act", "action"), ("pv_bg", "background"), ("pv_char", "character")):
                 if last.get(kind):
                     out |= set_ref(name, kind, last[kind], empty="（自動）")
-            return out
+            return out or gr.skip()   # 左のツリーで開いた項目の記憶が無いときは、何も更新しない
 
         def on_preview(st_v, n, *args):
             sel = dict(zip(PV_NAMES, args[len(FORM_NAMES):]))
             v = current(st_v, n, args[:len(FORM_NAMES)])
-            if v is None or st_v["mode"] == "folder":
-                return {}
+            if v is None or st_v["mode"] == "folder":   # 何も開いていない・フォルダにはプレビューがない（欄は開いたときに空になっている）
+                return gr.skip()
             res = preview(repo, st_v["kind"], v, original_id=st_v["id"],
                           choices={"action": sel["pv_act"], "slot": sel["pv_slot"], "character": sel["pv_char"],
                                    "background": sel["pv_bg"]})

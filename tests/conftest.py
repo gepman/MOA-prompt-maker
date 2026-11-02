@@ -93,3 +93,21 @@ def scene_of(action: str, cast: dict, background: str = "beach", **fields) -> Sc
 def compile_sample(repo: Repository, scene_id: str, **changes):
     """サンプル Scene を（必要なら一部を差し替えて）コンパイルする。"""
     return compile_scene(repo, replace(repo.scene(scene_id), **changes))
+
+
+def check_output_shape(demo, fn, out) -> None:
+    """ハンドラーの返り値 out が、Gradio の出力検証（個数・部品の対応）を通ることを確かめる。通らなければ ValueError。
+
+    Gradio の postprocess_data の前半と同じ判定を、Gradio 自身の関数で行う。postprocess_data そのものは出力部品を
+    作り直すので重い（1イベント約80ms）。空の dict `{}` を返すと、1個の値として数えられて「出力の個数が足りない」になる。
+    """
+    from gradio.blocks import convert_component_dict_to_list, skip
+
+    pred = out
+    if isinstance(pred, dict) and pred == skip() and len(fn.outputs) > 1:   # 単独の gr.skip() は全部の出力を「更新なし」にする
+        pred = [skip()] * len(fn.outputs)
+    if isinstance(pred, dict) and len(pred) > 0:
+        pred = convert_component_dict_to_list([b._id for b in fn.outputs], pred)
+    if len(fn.outputs) == 1 and not fn.batch:
+        pred = [pred]
+    demo.validate_outputs(fn, pred)
