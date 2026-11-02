@@ -70,7 +70,7 @@
     "inputs": {
       "seed": 539505033095114,
       "steps": 50,
-      "cfg": 3,
+      "cfg": 5,
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1,
@@ -200,8 +200,8 @@
   "16": {
     "inputs": {
       "seed": 792776031243328,
-      "steps": 30,
-      "cfg": 2,
+      "steps": 15,
+      "cfg": 1.5,
       "sampler_name": "er_sde",
       "scheduler": "simple",
       "denoise": 0.35,
