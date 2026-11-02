@@ -11,7 +11,7 @@ import gradio as gr
 from PIL import Image, ImageDraw
 
 from moa.comfy import (ComfyConfig, ComfyError, Generation, differences, effective_gen, iter_retry_anima,
-                       iter_run)
+                       iter_run, supports_anima_scale)
 from moa.comfy.config import STAGE_LABEL
 from moa.core import Repository
 from moa.core.gen import GEN_PARAMS
@@ -159,6 +159,15 @@ def build_ui(repo: Repository,
                                     rb = gr.Button("↩ ワークフローの値に戻す", size="sm", interactive=False,
                                                    scale=2, min_width=120)
                                 items[(stage, param)] = (sl, src, rb)
+                            if stage == "anima":   # 画面だけの設定。Scene には保存しない（gp にも入れない）
+                                scale_sl = gr.Slider(
+                                    label="解像度倍率（画面だけ・保存しない）", minimum=0.1, maximum=2.0, step=0.05,
+                                    value=1.0, interactive=False,
+                                    info="canvas の縦横比を保ったまま Anima段の解像度を変える。16の倍数に丸めて引き伸ばす")
+                                with gr.Row():
+                                    scale_md = gr.Markdown("")
+                                    scale_rb = gr.Button("↩ 1.0に戻す", size="sm", interactive=False,
+                                                         scale=0, min_width=120)
                 gen_btn = gr.Button("🎨 生成", variant="primary")
                 retry_btn = gr.Button("🔁 Anima段だけ再試行", visible=False)
                 gen_status = gr.Markdown()
@@ -195,7 +204,8 @@ def build_ui(repo: Repository,
         FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
                                  name_tb, slug_tb] + QE_OUT
         SLUG_IDX = FULL.index(slug_tb)
-        GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]]
+        GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]] + [scale_sl, scale_md, scale_rb]
+        GP_IN = [sc, gp, scale_sl]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
 
         # ---- 出力の組み立て ----
@@ -328,10 +338,24 @@ def build_ui(repo: Repository,
                 out.append(gr.update(interactive=st["overridden"]))
             return out
 
-        def refresh_gp(sc_v, gp_v):
-            """Scene を開いたら、その Scene.gen をスライダーに反映する。"""
+        def scale_view(sc_v, scale):
+            """解像度倍率の表示（操作できるか・サイズの文言・戻すボタン）。canvas が変わったときにも呼ぶ。"""
+            cfg = comfy["cfg"]
+            usable = cfg is not None and supports_anima_scale(cfg)
+            r = L.compile_view(repo, sc_v)
+            return [gr.update(interactive=usable), L.scale_text(r.canvas if r else None, scale, usable),
+                    gr.update(interactive=usable and scale != 1.0)]
+
+        def refresh_gp(sc_v, gp_v, scale):
+            """Scene を開いたら、その Scene.gen をスライダーに反映する（倍率のサイズ表示も更新する）。"""
             gp2 = L.sync_gp(sc_v, gp_v)
-            return [gp2] + gp_view(gp2)
+            return [gp2] + gp_view(gp2) + scale_view(sc_v, scale)
+
+        def on_scale_release(sc_v, scale):
+            return scale_view(sc_v, scale)[1:]
+
+        def on_scale_reset(sc_v):
+            return [1.0] + scale_view(sc_v, 1.0)[1:]
 
         def on_release(stage, param, value, gp_v):
             gp2 = L.set_override(gp_v, stage, param, value)
@@ -362,7 +386,9 @@ def build_ui(repo: Repository,
         def finished(done: Generation):
             """生成（または再試行）の結果を、画面の出力にする。"""
             paths = "\n".join(f"- {STAGE_LABEL[i.stage]}：`{i.record_path}`" for i in done.images)
-            used = f"\n\n使った値：{L.gen_summary(done.gen)}" if done.gen else ""
+            parts = ([L.gen_summary(done.gen)] if done.gen else []) \
+                + ([f"Anima解像度 {done.anima_size[0]}×{done.anima_size[1]}"] if done.anima_size else [])
+            used = f"\n\n使った値：{' ／ '.join(parts)}" if parts else ""
             if done.complete:
                 status = (f"✅ 完了　シード `{done.seed}`（MOSS段・Anima段で共通）{used}\n\n{paths}\n\n"
                           "※ 保存ボタンを押すと、シードと画像のパスが Scene に記録されます")
@@ -399,7 +425,7 @@ def build_ui(repo: Repository,
                            + "）。試し打ちなので、保存してもシードと画像は記録されません")
             yield out
 
-        def on_generate(sc_v, copy_dir, gp_v, moss, anima, negm, nega):
+        def on_generate(sc_v, copy_dir, gp_v, scale, moss, anima, negm, nega):
             """生成を実行し、経過を逐次表示する。YAMLへの記録は保存ボタンで行う。"""
             skip = gr.skip()
             cfg = comfy["cfg"]
@@ -418,10 +444,11 @@ def build_ui(repo: Repository,
             except Q.QuickEditError as e:
                 yield [f"❌ {e}", skip, skip, skip]
                 return
-            yield from stream(iter_run(cfg, result_sent, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]),
+            yield from stream(iter_run(cfg, result_sent, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"],
+                                       anima_scale=scale),
                               quick=Q.quick_info(result, sent))
 
-        def on_retry(sc_v, copy_dir, gp_v, gen_v):
+        def on_retry(sc_v, copy_dir, gp_v, scale, gen_v):
             """MOSS段が成功して Anima段が失敗したときだけ、Anima段のみを同じシードで再送する。"""
             skip = gr.skip()
             cfg = comfy["cfg"]
@@ -438,7 +465,8 @@ def build_ui(repo: Repository,
                        + "、".join(changed) + "\n\n全体を「生成」し直してください", skip, skip, skip]
                 return
             yield from stream(iter_retry_anima(cfg, Q.retry_result(result, gen_v), gen_v,
-                                               Path(copy_dir) if copy_dir else None, gen=gp_v["gen"]),
+                                               Path(copy_dir) if copy_dir else None, gen=gp_v["gen"],
+                                               anima_scale=scale),
                               quick=gen_v.get("quick_edit"))
 
         # ---- 配線 ----
@@ -451,36 +479,38 @@ def build_ui(repo: Repository,
         search_btn.click(on_search, [query_tb, nav], NAV_OUT, api_name="search_btn")
         clear_q_btn.click(on_clear_query, [nav], NAV_OUT, api_name="clear_query")
         lst.input(on_browse, [lst, sc, nav, qe], FULL, api_name="browse").then(
-            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_browse")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_browse")
         upload.upload(on_upload, [upload, sc, nav, qe], FULL, api_name="upload").then(
-            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_upload")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_upload")
         neg_cb.input(on_negative, [neg_cb, sc, nav, qe], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav, qe], FULL + COMFY_OUT, api_name="reload").then(
-            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_reload")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_reload")
         SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row]
         save_btn.click(partial(do_save, False), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT, api_name="save")
         ext_over_btn.click(partial(do_save, True), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT,
                            api_name="save_overwrite")
         ext_reload_btn.click(on_ext_reload, [sc, nav, qe], FULL + [save_msg, ext_row], api_name="ext_reload").then(
-            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_ext_reload")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_ext_reload")
         mkdir_btn.click(on_mkdir, [newdir_tb, nav], NAV_OUT + [newdir_tb], api_name="mkdir")
         demo.load(on_load, [sc, nav, qe], FULL + COMFY_OUT, api_name="init").then(
-            refresh_gp, [sc, gp], GP_OUT, api_name="gp_after_init")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_init")
         for (stage, param), (sl, src, rb) in items.items():
             sl.release(partial(on_release, stage, param), [sl, gp], [gp, src, rb],
                        api_name=f"gp_set_{stage}_{param}")
             rb.click(partial(on_reset, stage, param), [gp], [gp, sl, src, rb],
                      api_name=f"gp_reset_{stage}_{param}")
+        scale_sl.release(on_scale_release, [sc, scale_sl], [scale_md, scale_rb], api_name="scale_set")
+        scale_rb.click(on_scale_reset, [sc], [scale_sl, scale_md, scale_rb], api_name="scale_reset")
         pick_dir_btn.click(on_pick_dir, [copy_dir_tb], [copy_dir_tb, gen_status], api_name="pick_dir")
         clear_dir_btn.click(lambda: "", None, [copy_dir_tb], api_name="clear_dir")
-        gen_btn.click(on_generate, [sc, copy_dir_tb, gp, moss_tb, anima_tb, negm_tb, nega_tb], GEN_OUT, api_name="generate")
+        gen_btn.click(on_generate, [sc, copy_dir_tb, gp, scale_sl, moss_tb, anima_tb, negm_tb, nega_tb], GEN_OUT, api_name="generate")
         QE_IN = [qe, sc, moss_tb, anima_tb, negm_tb, nega_tb]
         for f, tb in QE_TB.items():
             tb.blur(on_qe_commit, QE_IN, QE_OUT, api_name=f"qe_blur_{f}")
         diff_btn.click(on_qe_commit, QE_IN, QE_OUT, api_name="qe_diff")
         for f, rb in QE_RB.items():
             rb.click(partial(on_qe_reset, f), [qe, sc], QE_OUT + [QE_TB[f]], api_name=f"qe_reset_{f}")
-        retry_btn.click(on_retry, [sc, copy_dir_tb, gp, gen], GEN_OUT, api_name="retry")
+        retry_btn.click(on_retry, [sc, copy_dir_tb, gp, scale_sl, gen], GEN_OUT, api_name="retry")
 
     return demo

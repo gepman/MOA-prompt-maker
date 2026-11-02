@@ -11,8 +11,31 @@ from .client import ComfyError
 from .config import ComfyConfig, STAGES
 
 
+SIZE_UNIT = 16        # モデルが要求する幅・高さの倍数
+MIN_SIDE = 64         # 倍率をかけた辺の下限（これ未満にはしない）
+SMALL_SIDE = 512      # これ未満になるときは警告を出す
+
+
+def anima_size(canvas: dict, scale: float) -> tuple[int, int]:
+    """canvas に倍率をかけた Anima 段の (幅, 高さ)。それぞれ最も近い16の倍数にし、下限は MIN_SIDE。"""
+    def one(x: int) -> int:
+        return max(MIN_SIDE, int(x * scale / SIZE_UNIT + 0.5) * SIZE_UNIT)
+    return one(canvas["w"]), one(canvas["h"])
+
+
+def supports_anima_scale(cfg: ComfyConfig) -> bool:
+    """倍率を使えるか。canvas を差し込む設定（width / height）があり、MOSS→Anima の接続が1つに決まること。"""
+    if not (cfg.width and cfg.height):
+        return False
+    try:
+        stage_boundary(cfg.workflow, cfg)
+    except ComfyError:
+        return False
+    return True
+
+
 def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
-          gen: dict | None = None) -> dict:
+          gen: dict | None = None, anima_scale: float = 1.0) -> dict:
     """プロンプト・シード・サイズを差し込んだワークフローを返す（元は変更しない）。
 
     ネガティブは「適用ON」のときだけ合成済みで置き換える。OFFのときはワークフローに
@@ -20,6 +43,8 @@ def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
     gen（Scene.gen）は、書かれた項目だけサンプラーの入力を上書きする。解決順は
     Scene.gen → ワークフローの値で、書かれなかった項目はワークフローの値のまま。
     nodes.samplers にない段の項目は無視する。
+    anima_scale が1.0以外のときだけ、MOSS→Anima の接続に ImageScale を挟み、Anima段の解像度を変える
+    （画面だけの設定で、Scene には保存しない）。
     """
     wf = copy.deepcopy(workflow)
 
@@ -41,7 +66,20 @@ def apply(workflow: dict, cfg: ComfyConfig, result: CompileResult, seed: int,
     if cfg.width and cfg.height and result.canvas:
         put(cfg.width, result.canvas["w"])
         put(cfg.height, result.canvas["h"])
+        if anima_scale != 1.0:
+            _insert_scale(wf, cfg, *anima_size(result.canvas, anima_scale))
     return wf
+
+
+def _insert_scale(wf: dict, cfg: ComfyConfig, w: int, h: int) -> None:
+    """MOSS段の画像を受け取る接続（VAEEncode.pixels など）の手前に、指定サイズへ拡大縮小する ImageScale を挟む。"""
+    consumer, input_name = stage_boundary(wf, cfg)
+    source = wf[consumer]["inputs"][input_name]
+    scale_id = str(max([int(k) for k in wf if k.isdigit()] + [0]) + 1)
+    wf[scale_id] = {"class_type": "ImageScale",
+                    "inputs": {"image": source, "upscale_method": "lanczos", "width": w, "height": h, "crop": "disabled"},
+                    "_meta": {"title": "Anima段の解像度倍率"}}
+    wf[consumer]["inputs"][input_name] = [scale_id, 0]
 
 
 def read_gen(wf: dict, cfg: ComfyConfig) -> dict:

@@ -15,7 +15,8 @@ from conftest import ROOT, compile_sample, edit, write
 from moa.comfy import (ComfyClient, ComfyError, Generation, apply, check_seed, differences, effective_gen,
                        iter_retry_anima, iter_run, load_config, new_seed, run, seed_limit, suggest)
 from moa.comfy.client import EventStream
-from moa.comfy.workflow import (ancestors, anima_only_workflow, read_gen, stage_boundary, suggestion_to_yaml)
+from moa.comfy.workflow import (ancestors, anima_only_workflow, anima_size, read_gen, stage_boundary,
+                                suggestion_to_yaml, supports_anima_scale)
 from moa.core import CastEntry, Repository, compile_scene
 from moa.core.constants import SEED_MAX
 
@@ -482,6 +483,73 @@ def test_retry_with_an_out_of_range_seed_does_not_start(cfg, result):
     with pytest.raises(ComfyError, match="範囲外"):
         list(iter_retry_anima(cfg, result, previous, client=fc))
     assert fc.submitted == []
+
+
+# ---- Anima段の解像度倍率（画面だけの設定。ImageScale を送信時に挟む）----
+def test_anima_size_rounds_to_16_and_has_a_floor():
+    assert anima_size({"w": 1024, "h": 1536}, 1.3) == (1328, 2000)   # 1331.2 → 1328、1996.8 → 2000
+    assert anima_size({"w": 1536, "h": 1024}, 1.0) == (1536, 1024)
+    assert anima_size({"w": 1024, "h": 1024}, 2.0) == (2048, 2048)
+    assert anima_size({"w": 1024, "h": 1536}, 0.1) == (96, 160)       # 102.4 → 96、153.6 → 160
+    assert anima_size({"w": 320, "h": 320}, 0.1) == (64, 64)          # 下限
+
+
+def test_apply_without_scale_adds_no_node(cfg, result):
+    assert apply(cfg.workflow, cfg, result, 1, None, 1.0) == apply(cfg.workflow, cfg, result, 1)
+
+
+def test_apply_with_scale_inserts_an_image_scale_before_the_anima_stage(cfg, result):
+    before = json.dumps(cfg.workflow, sort_keys=True)
+    wf = apply(cfg.workflow, cfg, result, 1, None, 1.5)
+    assert json.dumps(cfg.workflow, sort_keys=True) == before                      # 元は変更しない
+    new = [k for k in wf if k not in cfg.workflow]
+    assert len(new) == 1 and wf[new[0]]["class_type"] == "ImageScale"
+    scale = wf[new[0]]["inputs"]
+    assert (scale["width"], scale["height"], scale["crop"]) == (2304, 1536, "disabled")   # 1536×1024 ×1.5
+    assert scale["image"] == cfg.workflow["15"]["inputs"]["pixels"]                # MOSS のデコード結果を受ける
+    assert wf["15"]["inputs"]["pixels"] == [new[0], 0]                             # VAEEncode はその出力を受ける
+    assert (wf["6"]["inputs"]["width"], wf["6"]["inputs"]["height"]) == (1536, 1024)  # MOSS段の canvas はそのまま
+
+
+def test_scale_is_kept_in_the_anima_only_retry_workflow(cfg, result):
+    wf = apply(cfg.workflow, cfg, result, 1, None, 0.5)
+    retry = anima_only_workflow(wf, cfg, {"filename": "m.png", "subfolder": "", "type": "output"})
+    scale_id = retry["15"]["inputs"]["pixels"][0]
+    assert retry[scale_id]["class_type"] == "ImageScale" and (retry[scale_id]["inputs"]["width"], retry[scale_id]["inputs"]["height"]) == (768, 512)
+    assert retry[retry[scale_id]["inputs"]["image"][0]]["class_type"] == "LoadImage"
+    assert "7" not in retry and "9" not in retry                                   # MOSS 段は含まない
+
+
+def test_supports_anima_scale_needs_canvas_binding(cfg, cfg_path):
+    assert supports_anima_scale(cfg)
+    edit(cfg_path, 'width:  {node: "6", input: width}', "")
+    edit(cfg_path, 'height: {node: "6", input: height}', "")
+    c, _ = load_config(cfg_path)
+    assert c is not None and not supports_anima_scale(c)
+
+
+def test_iter_run_sends_the_scale_and_reports_the_size(cfg, result):
+    fc = FakeClient(MOSS_OK + ANIMA_OK)
+    events = list(iter_run(cfg, result, client=fc, seed=1, anima_scale=1.5))
+    g = events[-1]
+    assert g.anima_size == (2304, 1536) and any(n["class_type"] == "ImageScale" for n in fc.submitted[0].values())
+    assert any("2304×1536" in m for m in messages(events))
+    assert g.gen == gen_of(iter_run(cfg, result, client=FakeClient(MOSS_OK + ANIMA_OK), seed=1)).gen   # 記録される gen は倍率に影響されない
+    plain = gen_of(iter_run(cfg, result, client=FakeClient(MOSS_OK + ANIMA_OK), seed=1))
+    assert plain.anima_size is None
+
+
+def test_small_scale_warns(cfg, result):
+    msgs = messages(iter_run(cfg, result, client=FakeClient(MOSS_OK + ANIMA_OK), seed=1, anima_scale=0.2))
+    assert any("512px 未満" in m for m in msgs)
+
+
+def test_retry_uses_the_current_scale(cfg, result):
+    previous = failed_first_run(cfg, result)
+    fc = FakeClient(ANIMA_OK)
+    g = gen_of(iter_retry_anima(cfg, result, previous, client=fc, anima_scale=0.5))
+    assert g.anima_size == (768, 512)
+    assert any(n["class_type"] == "ImageScale" for n in fc.submitted[0].values())
 
 
 # ---- 記録条件（13.4章）----

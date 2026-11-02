@@ -18,7 +18,7 @@ from moa.core.scene_io import GenerationRecord
 
 from .client import ComfyClient, ComfyError
 from .config import STAGE_LABEL, STAGES, ComfyConfig
-from .workflow import anima_only_workflow, apply, read_gen
+from .workflow import SMALL_SIDE, anima_only_workflow, anima_size, apply, read_gen
 
 
 @dataclass
@@ -44,6 +44,7 @@ class Generation:
     action: str = ""
     canvas: dict = field(default_factory=dict)
     gen: dict = field(default_factory=dict)  # 実際に使った生成パラメータ（継承分も含む全項目）
+    anima_size: tuple[int, int] | None = None  # 倍率をかけたときの Anima 段の解像度（表示だけに使う。記録しない）
     failed_stage: str | None = None          # "moss" | "anima"
     error: str | None = None
 
@@ -237,16 +238,28 @@ def _warn_canvas(result: CompileResult) -> Iterator[str]:
         yield f"⚠ canvas {result.canvas['w']}×{result.canvas['h']} は16の倍数ではありません（モデルによっては失敗します）"
 
 
+def _scaled_size(result: CompileResult, anima_scale: float) -> tuple[int, int] | None:
+    """倍率が効くときの Anima 段の解像度。倍率1.0または canvas なしなら None。"""
+    return anima_size(result.canvas, anima_scale) if anima_scale != 1.0 and result.canvas else None
+
+
+def _warn_scale(size: tuple[int, int] | None, anima_scale: float) -> Iterator[str]:
+    if size:
+        yield f"Anima段は {size[0]}×{size[1]}（×{anima_scale:g}）で生成します"
+        if min(size) < SMALL_SIDE:
+            yield f"⚠ Anima段の解像度が {SMALL_SIDE}px 未満です（画質が落ちます）"
+
+
 def _generation(seed: int, images: list[ImageRef], result: CompileResult, used: dict,
-                failed: str | None, error: str | None) -> Generation:
+                failed: str | None, error: str | None, size: tuple[int, int] | None = None) -> Generation:
     return Generation(seed, images, result.moss_prompt, result.anima_prompt, result.apply_negative,
                       result.negative_moss, result.negative_anima, result.background_id, result.action_id,
-                      dict(result.canvas or {}), used, failed, error)
+                      dict(result.canvas or {}), used, size, failed, error)
 
 
 def iter_run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = None,
              client: ComfyClient | None = None, seed: int | None = None,
-             gen: dict | None = None) -> Iterator[str | Generation]:
+             gen: dict | None = None, anima_scale: float = 1.0) -> Iterator[str | Generation]:
     """経過メッセージ(str)を逐次 yield し、最後に Generation を yield する。
 
     段の失敗（タイムアウト・ComfyUI のエラー）は例外にせず、Generation の `failed_stage` / `error` で返す。
@@ -259,15 +272,18 @@ def iter_run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = No
     check_seed(seed, limit)
 
     yield from _warn_canvas(result)
-    workflow = apply(cfg.workflow, cfg, result, seed, gen)
+    workflow = apply(cfg.workflow, cfg, result, seed, gen, anima_scale)
     used = read_gen(workflow, cfg)  # 実際に送る値（Scene.gen → ワークフローの値）
+    size = _scaled_size(result, anima_scale)
+    yield from _warn_scale(size, anima_scale)
     yield f"シード {seed} で送信中…"
     images, failed, error = yield from _execute(cfg, client, workflow, list(STAGES), copy_dir)
-    yield _generation(seed, images, result, used, failed, error)
+    yield _generation(seed, images, result, used, failed, error, size)
 
 
 def iter_retry_anima(cfg: ComfyConfig, result: CompileResult, previous: dict, copy_dir: Path | None = None,
-                     client: ComfyClient | None = None, gen: dict | None = None) -> Iterator[str | Generation]:
+                     client: ComfyClient | None = None, gen: dict | None = None,
+                     anima_scale: float = 1.0) -> Iterator[str | Generation]:
     """Anima 段だけを再送する。MOSS 画像を入力にし、シード・gen・プロンプトは最初の生成と同じ。
 
     previous は最初の生成の `Generation.snapshot()`（`failed_stage` が anima で、MOSS 画像があること）。
@@ -279,21 +295,23 @@ def iter_retry_anima(cfg: ComfyConfig, result: CompileResult, previous: dict, co
     check_seed(seed, seed_limit(cfg, client))
 
     yield from _warn_canvas(result)
-    workflow = apply(cfg.workflow, cfg, result, seed, gen)
+    workflow = apply(cfg.workflow, cfg, result, seed, gen, anima_scale)
     used = read_gen(workflow, cfg)
+    size = _scaled_size(result, anima_scale)
+    yield from _warn_scale(size, anima_scale)
     ref = previous["moss_ref"]
     anima_workflow = anima_only_workflow(workflow, cfg, ref)
     yield f"シード {seed} で Anima 段だけを再送中…"
     moss_bytes = client.fetch_image(ref["filename"], ref["subfolder"], ref["type"])   # 表示のために MOSS 画像を取り直す
     images, failed, error = yield from _execute(cfg, client, anima_workflow, ["anima"], copy_dir)
     moss = ImageRef("moss", ref["filename"], ref["subfolder"], ref["type"], ref["record_path"], moss_bytes)
-    yield _generation(seed, [moss] + images, result, used, failed, error)
+    yield _generation(seed, [moss] + images, result, used, failed, error, size)
 
 
 def run(cfg: ComfyConfig, result: CompileResult, copy_dir: Path | None = None, client: ComfyClient | None = None,
-        seed: int | None = None, progress=None, gen: dict | None = None) -> Generation:
+        seed: int | None = None, progress=None, gen: dict | None = None, anima_scale: float = 1.0) -> Generation:
     done = None
-    for ev in iter_run(cfg, result, copy_dir, client, seed, gen):
+    for ev in iter_run(cfg, result, copy_dir, client, seed, gen, anima_scale):
         if isinstance(ev, Generation):
             done = ev
         elif progress:

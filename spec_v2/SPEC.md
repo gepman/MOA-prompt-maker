@@ -627,6 +627,17 @@ gen:
 - UI：項目ごとにスライダーと出どころ（Scene / ワークフロー）。動かした項目だけ Scene.gen に入る。項目ごとに「ワークフローの値に戻す」。
   Scene を開くとその Scene.gen が入る。Background / Action を選び直しただけでは操作中の値を保つ。`nodes.samplers` が未設定の段は操作不可
 
+### 13.6 Anima段の解像度倍率（画面だけ・保存しない）
+
+- UI のスライダー（0.1〜2.0、step 0.05、既定 1.0）。canvas の縦横比を保ったまま、Anima 段の解像度を変える
+- **Scene.gen にも `compiled`（`gen` / `images`）にも書かない**。13.4章の記録条件にも含めない。生成結果の表示に、使った解像度を出すだけ
+- サイズ：`w' = max(64, round(canvas.w × 倍率 / 16) × 16)`、`h'` も同様（それぞれ最も近い16の倍数。四捨五入は 0.5 を切り上げ）。
+  丸めで縦横比が最大1%弱ずれるが、画像全体を `w'×h'` に拡大縮小する（crop しない）。いずれかの辺が512px未満になるときは警告する
+- 実装：倍率が 1.0 以外のときだけ、送信するワークフローの MOSS→Anima の接続（`stage_boundary()` が見つける入力。VAEEncode の `pixels` など）の手前に
+  `ImageScale`（`lanczos`、`crop: disabled`、`w'`×`h'`）を挟む。ワークフロー JSON と `config.yaml` は変更しない。1.0 のときは何も挟まない
+- 使える条件：`nodes.width` / `nodes.height` の指定があり、MOSS→Anima の接続が1つに決まること。満たさないときはスライダーを操作不可にする
+- 「Anima段だけ再試行」（13.4章）は、再試行時点の倍率を使う（MOSS 画像 → `ImageScale` → Anima 段）
+
 ## 14. v1.x からの移行
 
 `python -m moa.migrate_v2 --src <v1.xのdataフォルダ> --out <新しいフォルダ>` を用意する。

@@ -15,4 +15,6 @@ def test_ui_builds_with_comfy_config(repo, tmp_path):
     cfg.write_text(cfg_text, encoding="utf-8")
     cfg_obj, issues = load_config(cfg)
     assert cfg_obj is not None, issues
-    build_ui(repo, lambda: load_config(cfg))
+    demo = build_ui(repo, lambda: load_config(cfg))
+    names = {fn.api_name for fn in demo.fns.values()}
+    assert {"scale_set", "scale_reset", "generate", "retry"} <= names   # 解像度倍率の配線

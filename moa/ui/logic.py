@@ -14,6 +14,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from moa.comfy.generate import differences
+from moa.comfy.workflow import SMALL_SIDE, anima_size
 from moa.core import CastEntry, Repository, Scene, compile_scene, resolve_outfit, save_scene, validate_scene_id
 from moa.core.constants import ROOTS
 from moa.core.filestamp import ExternalChangeError
@@ -522,6 +523,20 @@ def source_text(state: dict) -> str:
     if state["source"] is None:
         return "_（未設定）_"
     return f"出どころ：**{SOURCE_LABEL[state['source']]}**"
+
+
+def scale_text(canvas: dict | None, scale: float, usable: bool) -> str:
+    """Anima段の解像度倍率をかけた結果のサイズ表示（画面だけの設定。Scene には保存しない）。"""
+    if not usable:
+        return "_（この設定では使えません：config.yaml の width / height と、MOSS→Anima の接続が必要です）_"
+    if not canvas:
+        return "_（Action を選ぶとサイズを表示します）_"
+    cw, ch = canvas["w"], canvas["h"]
+    if scale == 1.0:
+        return f"→ canvas のまま（{cw}×{ch}）"
+    w, h = anima_size(canvas, scale)
+    warn = f"　⚠ {SMALL_SIDE}px 未満です" if min(w, h) < SMALL_SIDE else ""
+    return f"→ **{w}×{h}**（canvas {cw}×{ch} ×{scale:g}、16の倍数に丸めて引き伸ばし）{warn}"
 
 
 def gen_summary(gen: dict) -> str:
