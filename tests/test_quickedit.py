@@ -103,8 +103,8 @@ def test_a_quick_edit_generation_is_not_recorded_on_save(repo, cfg, base):
     sent, fields = Q.apply_quick_edit(base, {"anima": base.anima_prompt + ", sweat"})
     snap = gen_of(iter_run(cfg, sent, client=FakeClient(MOSS_OK + ANIMA_OK), seed=5)).snapshot()
     snap["quick_edit"] = Q.quick_info(base, fields)
-    _, msg = L.save(repo, sc, nav, "qe_trial", "", snap)
-    assert "試し打ち" in msg and "記録していません" in msg
+    _, msg = L.save(repo, sc, L.SaveTarget("qe_trial", folder=repo.root_dir("scene")), "", snap)
+    assert "試し打ち" in msg and "記録していません" in msg and "⚠" in msg
     compiled = repo.entry("scene", "qe_trial").raw["compiled"]
     assert not compiled.get("images") and compiled.get("seed") is None
     assert compiled["animaPrompt"] == base.anima_prompt          # 編集は compiled にも入らない
@@ -113,7 +113,7 @@ def test_a_quick_edit_generation_is_not_recorded_on_save(repo, cfg, base):
 def test_a_normal_generation_is_recorded_on_save(repo, cfg, base):
     sc, nav = opened(repo)
     snap = gen_of(iter_run(cfg, base, client=FakeClient(MOSS_OK + ANIMA_OK), seed=5)).snapshot()
-    L.save(repo, sc, nav, "normal_trial", "", snap)
+    L.save(repo, sc, L.SaveTarget("normal_trial", folder=repo.root_dir("scene")), "", snap)
     assert repo.entry("scene", "normal_trial").raw["compiled"]["seed"] == 5
 
 

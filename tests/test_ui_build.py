@@ -18,3 +18,6 @@ def test_ui_builds_with_comfy_config(repo, tmp_path):
     demo = build_ui(repo, lambda: load_config(cfg))
     names = {fn.api_name for fn in demo.fns.values()}
     assert {"scale_set", "scale_reset", "generate", "retry"} <= names   # 解像度倍率の配線
+    assert {"save_overwrite", "save_as", "save_confirm", "save_cancel", "save_ext_overwrite", "ext_reload",
+            "sv_move", "sv_select", "mkdir"} <= names                    # 保存ブロックの配線（10.2章）
+    assert not {"pick_savedir", "set_savedir"} & names                  # 共通ピッカーでは保存先を選ばない

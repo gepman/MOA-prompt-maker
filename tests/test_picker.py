@@ -130,10 +130,3 @@ def test_builder_browser_search_is_flat_with_paths_and_selectable(data_dir):
 
     assert L.listing(repo, L.set_query(nav, ""))[0][0][1].startswith("dir:")          # 空に戻すとフォルダ表示
     assert L.set_target(nav, "char", "a")["query"] == ""                              # 選択先を変えると解除
-
-
-def test_builder_browser_search_is_off_for_the_save_destination(data_dir):
-    repo = tree(data_dir)
-    nav = L.set_query(L.set_target(L.new_nav(), "savedir"), "abc")
-    choices, crumbs = L.listing(repo, nav)
-    assert choices == [] and "フォルダ表示" in crumbs

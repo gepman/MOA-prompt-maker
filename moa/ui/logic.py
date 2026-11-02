@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import copy
-import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -18,16 +18,15 @@ from moa.comfy.workflow import SMALL_SIDE, anima_size
 from moa.core import CastEntry, Repository, Scene, compile_scene, resolve_outfit, save_scene, validate_scene_id
 from moa.core.constants import ROOTS
 from moa.core.filestamp import ExternalChangeError
-from moa.core.folders import create_folder
 from moa.core.gen import GEN_PARAMS, clean_gen, normalize_value
 from moa.core.models import CompileResult, Issue, has_error
 from moa.core.scene_io import GenerationRecord
 from moa.core import picker
 from moa.core.tree import breadcrumb, list_folder
 
-# 共有ブラウザの選択先 → ルートフォルダ。savedir は「保存先フォルダ」を scenes/ 配下から選ぶモード
+# 共有ブラウザの選択先 → ルートフォルダ（保存先は共有ブラウザでは選ばない。moa.ui.saveblock の保存ブロックで選ぶ）
 SECTION = {"scene": "scenes", "action": "actions", "background": "backgrounds",
-           "char": "characters", "outfit": "outfits", "savedir": "scenes"}
+           "char": "characters", "outfit": "outfits"}
 KIND = {"scene": "scene", "action": "action", "background": "background", "char": "character", "outfit": "outfit"}
 INHERIT = "__inherit__"
 EXTERNAL_PREFIX = "⚠ ファイルが外部で変更されています"   # save() がこの文言で始まるメッセージを返したら、2択を出す
@@ -43,8 +42,8 @@ def new_sc() -> dict:
 
 
 def new_nav() -> dict:
-    # cwd はルート名をキーに、data からの相対パスを持つ。save_dir は新規 Scene の保存先
-    return {"target": "scene", "slot": None, "cwd": {r: r for r in ROOTS}, "save_dir": "scenes", "query": ""}
+    # cwd はルート名をキーに、data からの相対パスを持つ
+    return {"target": "scene", "slot": None, "cwd": {r: r for r in ROOTS}, "query": ""}
 
 
 # ---- Scene の組み立て ----
@@ -82,7 +81,6 @@ def target_label(nav: dict) -> str:
         "background": "**選択先：Background**",
         "char": f"**選択先：`{slot}` のキャラクター**",
         "outfit": f"**選択先：`{slot}` の服装**",
-        "savedir": "**選択先：Scene の保存先フォルダ**（フォルダを開いて「このフォルダを保存先にする」）",
     }[t]
 
 
@@ -114,29 +112,11 @@ def _cwd(repo: Repository, nav: dict) -> Path:
     return cwd if cwd.is_dir() else root
 
 
-def save_dir_path(repo: Repository, nav: dict) -> Path:
-    """保存先フォルダ（scenes/ 配下）。scenes/ の外は使わず、scenes/ に戻す。まだないフォルダは、保存時に作られる。"""
-    root = (repo.root / "scenes").resolve()
-    path = (repo.root / nav["save_dir"]).resolve()
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return root
-    return path
-
-
-def savedir_text(repo: Repository, nav: dict) -> str:
-    path = save_dir_path(repo, nav)
-    return f"新規 Scene の保存先：`{repo.rel(path)}/`"
-
-
 def listing(repo: Repository, nav: dict) -> tuple[list[tuple[str, str]], str]:
-    """(Radioの選択肢[(表示, 値)], パンくず文字列)。savedir のときはフォルダだけを並べる。"""
+    """(Radioの選択肢[(表示, 値)], パンくず文字列)。"""
     root, cwd = _section_root(repo, nav), _cwd(repo, nav)
     choices: list[tuple[str, str]] = []
     query = nav.get("query") or ""
-    if query and nav["target"] == "savedir":
-        return [], "保存先はフォルダ表示で選んでください（検索は使えません）"
     if query:  # 検索中：ルート全体から平らに。クリックで選べる（値は file:<相対パス>）
         rows, total = picker.search(repo, root, query)
         for entry, where in rows:
@@ -145,8 +125,6 @@ def listing(repo: Repository, nav: dict) -> tuple[list[tuple[str, str]], str]:
     if cwd != root:
         choices.append(("⬆ 上へ", "up"))
     for it in list_folder(repo, cwd):
-        if nav["target"] == "savedir" and it.kind != "folder":
-            continue
         prefix = "dir:" if it.kind == "folder" else "file:"
         choices.append((it.label, prefix + repo.rel(it.path)))
     crumbs = " / ".join(label for label, _ in breadcrumb(repo, root, cwd))
@@ -159,17 +137,6 @@ def _set_cwd(repo: Repository, nav: dict, folder: Path) -> dict:
     return nav
 
 
-def make_savedir(repo: Repository, nav: dict, name: str) -> str:
-    """保存先を選ぶ画面で開いているフォルダの中に、新しいフォルダを作る（EDITOR_SPEC 12章-3。名前の検証は 2章と同じ）。"""
-    if nav["target"] != "savedir":
-        return "⚠ 先に「保存先フォルダを選ぶ」を押して、フォルダを作る場所を開いてください"
-    try:
-        path = create_folder(repo.root / "scenes", _cwd(repo, nav), (name or "").strip())
-    except ValueError as e:
-        return f"⚠ {e}"
-    return f"📁 フォルダを作りました：`{repo.rel(path)}/`（開いて「このフォルダを保存先にする」で選べます）"
-
-
 def reopen_scene(repo: Repository, sc: dict, nav: dict) -> tuple[dict, dict, str]:
     """外部変更の確認で［再読み込み（編集を破棄）］を選んだとき：データを読み直し、開いている Scene を開き直す。"""
     repo.reload()
@@ -178,15 +145,6 @@ def reopen_scene(repo: Repository, sc: dict, nav: dict) -> tuple[dict, dict, str
         return sc, nav, "⚠ 開いている Scene が見つかりません"
     nav = set_target(nav, "scene")
     return apply_entry(repo, sc, nav, entry)
-
-
-def choose_savedir(repo: Repository, nav: dict) -> tuple[dict, str]:
-    """今開いているフォルダを、新規 Scene の保存先にする。"""
-    if nav["target"] != "savedir":
-        return nav, "⚠ 先に「保存先フォルダを選ぶ」を押して、保存先を選ぶ画面にしてください"
-    nav = copy.deepcopy(nav)
-    nav["save_dir"] = repo.rel(_cwd(repo, nav))
-    return nav, f"✅ 保存先を `{nav['save_dir']}/` にしました"
 
 
 def _first_empty_slot(repo: Repository, sc: dict) -> str | None:
@@ -207,8 +165,6 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
     """選択先に応じて、選んだエントリを反映する。(sc, nav, メッセージ)"""
     sc, nav = copy.deepcopy(sc), copy.deepcopy(nav)
     t = nav["target"]
-    if t == "savedir":
-        return sc, nav, "⚠ 保存先にはフォルダを選んでください（ファイルは選べません）"
     if entry.kind != KIND[t]:
         return sc, nav, f"⚠ ここでは {KIND[t]} を選んでください（{entry.kind}）"
 
@@ -276,8 +232,6 @@ def from_upload(repo: Repository, sc: dict, nav: dict, uploaded: str | None) -> 
     """ブラウザ経由では元パスが取れないので、YAMLの id から索引で元ファイルを特定する（10章）。"""
     if not uploaded:
         return sc, nav, ""
-    if nav["target"] == "savedir":
-        return sc, nav, "⚠ 保存先にはフォルダを選んでください"
     try:
         data = YAML(typ="safe").load(Path(uploaded).read_text(encoding="utf-8"))
     except Exception as e:
@@ -395,36 +349,29 @@ def selection_text(repo: Repository, sc: dict) -> str:
     return "\n\n".join(lines)
 
 
-# ---- 保存（10章）----
-def auto_scene_id(repo: Repository, sc: dict) -> str:
-    """id が空のときの自動命名：`<名前>_1`, `_2`…（空いている最小の番号）。
-
-    名前の元は、開いているSceneの id（末尾の `_数字` は除く）。なければ `<action id>__scene`。
-    """
-    base = re.sub(r"_\d+$", "", sc["scene_id"]) if sc["scene_id"] else f"{sc['action_id']}__scene"
-
-    def taken(sid: str) -> bool:  # 索引にあるか、索引にない（読み込めない）ファイルが同名で存在するか
-        return repo.entry("scene", sid) is not None or any(repo.root_dir("scene").rglob(f"{sid}.yaml"))
-
-    n = 1
-    while taken(f"{base}_{n}"):
-        n += 1
-    return f"{base}_{n}"
+# ---- 保存（10.2章）----
+@dataclass(frozen=True)
+class SaveTarget:
+    """保存の行き先。path があれば既存のファイルへの上書き、folder があれば新しいファイルを作る（scenes/ 配下）。"""
+    scene_id: str
+    path: Path | None = None
+    folder: Path | None = None
 
 
-def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str, generated: dict | None = None,
+def save(repo: Repository, sc: dict, target: SaveTarget, display_name: str = "", generated: dict | None = None,
          gen_params: dict | None = None, effective: dict | None = None, force: bool = False) -> tuple[dict, str]:
-    """Scene を保存する。id が空なら `<名前>_N` で新規保存。既存 Scene の上書きは、同じ id を明示したときだけ。
+    """Scene を target に保存し、保存した Scene を「開いている Scene」にして返す。
 
-    generated（生成結果のスナップショット）は、生成時と今で食い違う項目がなければ seed / images / gen / partial として記録する。
-    食い違うときは、記録せず、違った項目名を返すメッセージに列挙する。
+    compiled のスナップショットは毎回書く。generated（生成結果のスナップショット）は、生成時と今で食い違う項目がなければ
+    seed / images / gen / partial として記録する。食い違うときは、記録せずに保存し、違った項目名を警告として返すメッセージに列挙する。
+    クイック編集の内容は含めない（sc は編集前のコンパイル結果の元になる Scene の定義だけ）。
     gen_params は画面で上書きした項目（gp["gen"]）で、Scene.gen として保存する。
     effective は gen の実効値（記録条件の比較用。ComfyUI 連携が無効なら None）。
-    既存の Scene を書くとき、読み込み後にファイルが外部で変更されていれば保存を止める（EXTERNAL_PREFIX で始まるメッセージ）。
+    既存のファイルを書くとき、読み込み後にファイルが外部で変更されていれば保存を止める（EXTERNAL_PREFIX で始まるメッセージ）。
     force=True はその確認で［上書き保存］を選んだとき。
     """
     sc = copy.deepcopy(sc)
-    sc_before_id = sc["scene_id"]   # 開いている Scene の id（scene_id を書き換える前）
+    opened_id = sc["scene_id"]   # 開いている Scene の id（scene_id を書き換える前）
     if not sc["action_id"]:
         return sc, "⚠ Action が未選択です"
     if not sc["background_id"]:
@@ -434,9 +381,7 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
     if gen_params is not None:
         sc["gen"] = clean_gen(gen_params)
     try:
-        scene_id = scene_id.strip() or auto_scene_id(repo, sc)
-        sc["scene_id"] = validate_scene_id(scene_id)
-        overwrite = repo.scene(sc["scene_id"]) is not None
+        sc["scene_id"] = validate_scene_id(target.scene_id)
         scene = build_scene(sc)
         result = compile_scene(repo, scene)
         if has_error(result.issues):
@@ -444,12 +389,12 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
 
         record, note = None, ""
         if generated and generated.get("images") and generated.get("quick_edit"):   # 10.1章：試し打ちは記録しない
-            note = ("\n\nℹ クイック編集した文字列での生成（試し打ち）なので、シードと画像は記録していません"
-                    "（Scene と compiled は編集内容を含まないコンパイル結果のまま保存します）")
+            note = ("\n\n⚠ クイック編集した文字列での生成（試し打ち）なので、シードと画像は記録していません"
+                    "（Scene と compiled は編集内容を含まないコンパイル結果のまま保存しました）")
         elif generated and generated.get("images"):
             diff = differences(generated, result, effective)
             if diff:
-                note = ("\n\nℹ 生成後に次の項目が変わったため、生成結果（シード・画像）は記録していません"
+                note = ("\n\n⚠ 生成後に次の項目が変わったため、生成結果（シード・画像）は記録していません"
                         + ("（部分結果も破棄）" if generated.get("partial") else "") + "：" + "、".join(diff))
             else:
                 record = GenerationRecord(generated["seed"], list(generated["images"]), generated.get("gen"),
@@ -457,11 +402,11 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
                 note = (f"\n\n🖼 シード {record.seed} と画像 {len(record.images)} 枚のパスを記録しました"
                         + ("（MOSS段だけの部分結果。`compiled.partial: true`）" if record.partial else ""))
         expected = None
-        if overwrite and not force:
-            opened = sc["scene_id"] == sc_before_id and sc.get("stamp")
-            expected = tuple(sc["stamp"]) if opened else repo.entry("scene", sc["scene_id"]).stamp
-        path = save_scene(repo, scene, result, generation=record,
-                          folder=None if overwrite else save_dir_path(repo, nav), expected_stamp=expected)
+        if target.path is not None and not force:
+            entry = repo.entry("scene", sc["scene_id"])
+            expected = tuple(sc["stamp"]) if opened_id == sc["scene_id"] and sc.get("stamp") else (entry.stamp if entry else None)
+        path = save_scene(repo, scene, result, path=target.path, generation=record, folder=target.folder,
+                          expected_stamp=expected)
     except ExternalChangeError:
         return sc, EXTERNAL_PREFIX + "（VS Code・エディタ・エクスプローラーなど）。読み直すか、上書きするか選んでください"
     except ValueError as e:
@@ -469,8 +414,7 @@ def save(repo: Repository, sc: dict, nav: dict, scene_id: str, display_name: str
     repo.reload()
     entry = repo.entry("scene", sc["scene_id"])
     sc["stamp"] = list(entry.stamp) if entry and entry.stamp else None
-    verb = "上書き保存しました" if overwrite else "新規保存しました"
-    return sc, f"💾 {verb}：`{path}`{note}"
+    return sc, f"💾 保存しました：`{path}`{note}"
 
 
 # ---- 生成パラメータ（Scene.gen）----

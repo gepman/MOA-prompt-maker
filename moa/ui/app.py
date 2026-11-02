@@ -18,6 +18,7 @@ from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue
 from moa.ui import logic as L
 from moa.ui import quickedit as Q
+from moa.ui import saveblock as SB
 from moa.ui.dialogs import pick_folder
 from moa.ui.style import DEFAULT_PROMPT_FONT_PX, JUMP_JS, TEXTBOX_ID, prompt_css
 
@@ -52,6 +53,7 @@ def build_ui(repo: Repository,
         nav = gr.State(L.new_nav())
         gen = gr.State(None)  # 直近の生成結果のスナップショット（保存ボタンで Scene に記録する。再試行にも使う）
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
+        sv = gr.State(SB.new_sv())  # 保存ブロックの状態（保存先フォルダ・一覧で選んだ Scene・確認待ち）。共通ピッカーの nav とは別
         qe = gr.State(Q.new_qe())  # クイック編集（10.1章）：編集した欄・差分。保存はしない
 
         with gr.Row():
@@ -69,7 +71,6 @@ def build_ui(repo: Repository,
                 with gr.Row():
                     upload = gr.UploadButton("YAMLファイルを指定", file_types=[".yaml", ".yml"], size="sm")
                     reload_btn = gr.Button("🔄 データ再読み込み", size="sm")
-                setdir_btn = gr.Button("📍 このフォルダを保存先にする", size="sm")
 
             # ---- 右：Scene 組み立て ----
             with gr.Column(scale=5):
@@ -174,28 +175,36 @@ def build_ui(repo: Repository,
                 gallery = gr.Gallery(label="生成結果（MOSS段 → Anima段）", columns=2, height="auto",
                                      object_fit="contain", interactive=False)
 
-                # 保存は誤操作を避けるため、画面の一番下に置く
-                gr.Markdown("---\n### 保存")
+                # 保存は「開く」とは別の操作。誤操作を避けるため、画面の一番下に専用のブロックを置く（10.2章）
+                gr.Markdown("---\n### シーンを保存")
+                sv_crumbs = gr.Markdown()
+                with gr.Row():
+                    folder_rd = gr.Radio(choices=[], value=None, label="保存先フォルダ（クリックで移動。scenes/ 配下）")
+                    scene_rd = gr.Radio(choices=[], value=None,
+                                        label="このフォルダの Scene（選ぶと id 欄に入ります。別名保存で上書きできるのは、ここで選んだ Scene だけ）")
+                with gr.Row():
+                    newdir_tb = gr.Textbox(label="新しいフォルダ名（上で開いているフォルダの中に作ります）", scale=3)
+                    mkdir_btn = gr.Button("＋フォルダ作成", size="sm", scale=1)
                 with gr.Row():
                     name_tb = gr.Textbox(label="Scene表示名（任意）", scale=2)
                     slug_tb = gr.Textbox(
-                        label="Scene の id（半角英小文字・数字・_）",
-                        info="空欄なら「<名前>_1」「_2」…と番号を付けて新規保存（開いている Scene があればその id、なければ <Action の id>__scene）。"
-                             "既存と同じ id を入力したときだけ上書き。目安は「<Action の id>__〜」",
+                        label="別名で保存する Scene の id（半角英小文字・数字・_）",
+                        info="初期値は「<元のid>_copy」（新規作成中は「<Action の id>__default」）。使われていれば番号を進めます",
                         scale=3)
                 with gr.Row():
-                    savedir_md = gr.Markdown(L.savedir_text(repo, L.new_nav()))
-                    pick_save_btn = gr.Button("📁 保存先フォルダを選ぶ", size="sm")
-                with gr.Row():
-                    newdir_tb = gr.Textbox(label="新しいフォルダ名（保存先を選ぶ画面で開いているフォルダの中に作ります）", scale=3)
-                    mkdir_btn = gr.Button("＋フォルダ作成", size="sm", scale=1)
-                save_btn = gr.Button("💾 保存", variant="secondary")
+                    over_btn = gr.Button("💾 上書き保存", variant="secondary", interactive=False)
+                    saveas_btn = gr.Button("💾 別名で保存", variant="secondary")
+                over_md = gr.Markdown()
                 save_msg = gr.Markdown()
+                with gr.Row(visible=False) as confirm_row:   # 別名保存で、選んだ既存 Scene を上書きするときの確認
+                    confirm_md = gr.Markdown()
+                    confirm_ok_btn = gr.Button("上書きする", variant="stop", size="sm")
+                    confirm_cancel_btn = gr.Button("キャンセル", size="sm")
                 with gr.Row(visible=False) as ext_row:   # 外部変更の検知（EDITOR_SPEC 12章-4）
                     ext_reload_btn = gr.Button("再読み込み（編集を破棄）", size="sm")
-                    ext_over_btn = gr.Button("上書き保存", variant="stop", size="sm")
+                    ext_over_btn = gr.Button("外部の変更を捨てて上書き保存", variant="stop", size="sm")
 
-        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, savedir_md, query_tb]
+        NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, query_tb]
         QE_VIEW = [moss_st, anima_st, negm_st, nega_st, moss_rb, anima_rb, negm_rb, nega_rb, diff_tb,
                    moss_df, anima_df, negm_df, nega_df]
         QE_OUT = [qe] + QE_VIEW
@@ -203,7 +212,9 @@ def build_ui(repo: Repository,
         QE_RB = dict(zip(Q.FIELDS, [moss_rb, anima_rb, negm_rb, nega_rb]))
         FULL = [sc] + NAV_OUT + [sel_md, moss_tb, anima_tb, negm_tb, nega_tb, summary_md, issues_md, neg_cb,
                                  name_tb, slug_tb] + QE_OUT
-        SLUG_IDX = FULL.index(slug_tb)
+        SV_VIEW = [sv_crumbs, folder_rd, scene_rd, over_btn, over_md, confirm_row, confirm_md]
+        SV_IN = [sc, sv]
+        SV_OUT = [sv] + SV_VIEW + [slug_tb]
         GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]] + [scale_sl, scale_md, scale_rb]
         GP_IN = [sc, gp, scale_sl]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
@@ -217,8 +228,7 @@ def build_ui(repo: Repository,
         def nav_part(nav_v, msg):
             choices, crumbs = L.listing(repo, nav_v)
             return [nav_v, gr.update(choices=choices, value=None), crumbs, L.target_label(nav_v),
-                    gr.skip() if msg is None else msg, L.savedir_text(repo, nav_v),
-                    nav_v.get("query", "")]
+                    gr.skip() if msg is None else msg, nav_v.get("query", "")]
 
         def nav_out(nav_v, msg=None):
             return nav_part(nav_v, msg)
@@ -230,7 +240,7 @@ def build_ui(repo: Repository,
 
         def full(sc_old, sc_new, nav_v, qe_v, msg=None, sc_changed=True):
             if not sc_changed:  # フォルダ移動だけのときは、枠の描き直しとコンパイルを避ける
-                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * 24
+                return [gr.skip()] + nav_part(nav_v, msg) + [gr.skip()] * (len(FULL) - 1 - len(NAV_OUT))
             r = L.compile_view(repo, sc_new)
             apply = sc_new["apply_negative"]
             note = "" if apply else "（未適用・参考表示）"
@@ -259,10 +269,6 @@ def build_ui(repo: Repository,
 
         def on_clear_query(nav_v):
             return nav_out(L.set_query(nav_v, ""), "")
-
-        def on_setdir(nav_v):
-            nav2, msg = L.choose_savedir(repo, nav_v)
-            return nav_out(nav2, msg)
 
         def on_outfit(slot, sc_v, nav_v, value, qe_v):
             return full(sc_v, L.set_outfit(sc_v, slot, value), nav_v, qe_v)
@@ -296,21 +302,89 @@ def build_ui(repo: Repository,
             reload_comfy()
             return full(sc_v, sc_v, nav_v, qe_v, "") + [data_issues_text()] + comfy_parts()
 
+        # ---- 保存（10.2章）----
+        def sv_parts(sv_v, sc_v):
+            """保存ブロックの表示（パンくず・フォルダ一覧・Scene 一覧・上書き先・確認行）。"""
+            crumbs, folders, scenes = SB.listing(repo, sv_v)
+            pending = sv_v["pending"]
+            confirm = bool(pending and pending["kind"] == "confirm")
+            return [f"保存先フォルダ：`{repo.rel(SB.cwd_path(repo, sv_v))}/`（{crumbs}）",
+                    gr.update(choices=folders, value=None),
+                    gr.update(choices=scenes, value=SB.selected_value(repo, sv_v)),
+                    gr.update(interactive=SB.overwrite_target(repo, sc_v) is not None),
+                    SB.overwrite_label(repo, sc_v),
+                    gr.update(visible=confirm), SB.confirm_text(pending)]
+
+        def refresh_save(sc_v, sv_v):
+            """Scene を開き直した／Action を選び直したときだけ、フォルダと id の初期値を作り直す。"""
+            sv2, new_id = SB.sync(repo, sv_v, sc_v)
+            return [sv2] + sv_parts(sv2, sc_v) + [gr.update(value=new_id) if new_id is not None else gr.skip()]
+
+        def on_sv_move(choice, sc_v, sv_v):
+            sv2 = SB.move(repo, sv_v, choice)
+            return [sv2] + sv_parts(sv2, sc_v)
+
+        def on_sv_select(choice, sc_v, sv_v):
+            sv2, sid = SB.select(repo, sv_v, choice)
+            return [sv2] + sv_parts(sv2, sc_v) + [gr.update(value=sid) if sid else gr.skip()]
+
+        def on_mkdir(name, sc_v, sv_v):
+            msg = SB.make_folder(repo, sv_v, name)
+            return sv_parts(sv_v, sc_v) + [msg, gr.update(value="") if msg.startswith("📁") else gr.skip()]
+
         def effective_of(gp_v):
             cfg = comfy["cfg"]
             return effective_gen(cfg, gp_v["gen"]) if cfg is not None and cfg.samplers else None
 
-        def do_save(force, sc_v, nav_v, slug, display_name, gen_v, gp_v, qe_v):
-            sc2, msg = L.save(repo, sc_v, nav_v, slug, display_name, gen_v, gen_params=gp_v["gen"],
-                              effective=effective_of(gp_v), force=force)
-            out = full(sc_v, sc2, nav_v, qe_v)
-            if msg.startswith("💾"):
-                out[SLUG_IDX] = gr.update(value="")  # 保存できたら id 欄を空に戻す
-            return out + [msg, data_issues_text(), gr.update(visible=msg.startswith(L.EXTERNAL_PREFIX))]
+        def no_save(msg, sv_v):
+            """保存せずにメッセージだけ出す（Scene の表示は変えない）。"""
+            return [gr.skip()] * len(FULL) + [msg, gr.skip(), gr.update(visible=False), sv_v]
 
-        def on_ext_reload(sc_v, nav_v, qe_v):
-            sc2, nav2, msg = L.reopen_scene(repo, sc_v, nav_v)
-            return full(sc_v, sc2, nav2, qe_v, msg) + ["", gr.update(visible=False)]
+        def run_save(target, force, sc_v, nav_v, sv_v, name, gen_v, gp_v, qe_v):
+            sc2, msg = L.save(repo, sc_v, target, name, gen_v, gen_params=gp_v["gen"],
+                              effective=effective_of(gp_v), force=force)
+            external = msg.startswith(L.EXTERNAL_PREFIX)
+            sv2 = SB.set_pending(sv_v, SB.pack(repo, target, "external") if external else None)
+            return full(sc_v, sc2, nav_v, qe_v) + [msg, data_issues_text(), gr.update(visible=external), sv2]
+
+        def on_save_over(sc_v, nav_v, sv_v, slug, name, gen_v, gp_v, qe_v):
+            target = SB.overwrite_target(repo, sc_v)
+            if target is None:
+                return no_save("⚠ 上書き保存できるのは、Scene を開いているときだけです（新規作成中は「別名で保存」を使ってください）", sv_v)
+            return run_save(target, False, sc_v, nav_v, sv_v, name, gen_v, gp_v, qe_v)
+
+        def on_save_as(sc_v, nav_v, sv_v, slug, name, gen_v, gp_v, qe_v):
+            kind, where, sid = SB.plan_saveas(repo, sv_v, slug)
+            if kind == "error":
+                return no_save(where, SB.set_pending(sv_v, None))
+            if kind == "confirm":
+                pending = SB.pack(repo, L.SaveTarget(sid, path=where), "confirm")
+                return no_save("⚠ 上書きの確認が必要です。下の［上書きする］を押すと保存します", SB.set_pending(sv_v, pending))
+            return run_save(L.SaveTarget(sid, folder=where), False, sc_v, nav_v, sv_v, name, gen_v, gp_v, qe_v)
+
+        def on_confirm(sc_v, nav_v, sv_v, slug, name, gen_v, gp_v, qe_v):
+            pending = sv_v["pending"]
+            if not pending or pending["kind"] != "confirm":
+                return no_save("⚠ 確認待ちの保存がありません", sv_v)
+            return run_save(SB.unpack(repo, pending), False, sc_v, nav_v, sv_v, name, gen_v, gp_v, qe_v)
+
+        def on_cancel(sv_v):
+            return no_save("キャンセルしました。保存していません", SB.set_pending(sv_v, None))
+
+        def on_ext_over(sc_v, nav_v, sv_v, slug, name, gen_v, gp_v, qe_v):
+            pending = sv_v["pending"]
+            if not pending or pending["kind"] != "external":
+                return no_save("⚠ 外部変更で止まった保存がありません", sv_v)
+            return run_save(SB.unpack(repo, pending), True, sc_v, nav_v, sv_v, name, gen_v, gp_v, qe_v)
+
+        def on_ext_reload(sc_v, nav_v, sv_v, qe_v):
+            target = SB.unpack(repo, sv_v["pending"])
+            sv2 = SB.set_pending(sv_v, None)
+            if target is not None and target.scene_id == sc_v["scene_id"]:   # 開いている Scene を読み直す
+                sc2, nav2, msg = L.reopen_scene(repo, sc_v, nav_v)
+                return full(sc_v, sc2, nav2, qe_v, msg) + ["", gr.update(visible=False), sv2]
+            repo.reload()
+            return [gr.skip()] * len(FULL) + ["🔄 読み直しました。もう一度保存してください", gr.update(visible=False), sv2]
 
         # ---- クイック編集（10.1章）----
         def on_qe_commit(qe_v, sc_v, moss, anima, negm, nega):
@@ -321,10 +395,6 @@ def build_ui(repo: Repository,
         def on_qe_reset(field, qe_v, sc_v):
             qe2 = Q.reset_field(qe_v, field)
             return qe_part(qe2, sc_v["apply_negative"]) + [Q.base_values(qe2["result"])[field]]
-
-        def on_mkdir(name, nav_v):
-            msg = L.make_savedir(repo, nav_v, name)
-            return nav_out(nav_v, msg) + [gr.update(value="") if msg.startswith("📁") else gr.skip()]
 
         # ---- 生成パラメータ（スライダー）----
         def gp_view(gp_v):
@@ -473,28 +543,42 @@ def build_ui(repo: Repository,
         pick_scene_btn.click(partial(on_pick, "scene", None), [nav], NAV_OUT, api_name="pick_scene")
         pick_action_btn.click(partial(on_pick, "action", None), [nav], NAV_OUT, api_name="pick_action")
         pick_bg_btn.click(partial(on_pick, "background", None), [nav], NAV_OUT, api_name="pick_background")
-        pick_save_btn.click(partial(on_pick, "savedir", None), [nav], NAV_OUT, api_name="pick_savedir")
-        setdir_btn.click(on_setdir, [nav], NAV_OUT, api_name="set_savedir")
         query_tb.submit(on_search, [query_tb, nav], NAV_OUT, api_name="search")
         search_btn.click(on_search, [query_tb, nav], NAV_OUT, api_name="search_btn")
         clear_q_btn.click(on_clear_query, [nav], NAV_OUT, api_name="clear_query")
         lst.input(on_browse, [lst, sc, nav, qe], FULL, api_name="browse").then(
-            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_browse")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_browse").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_browse")
         upload.upload(on_upload, [upload, sc, nav, qe], FULL, api_name="upload").then(
-            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_upload")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_upload").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_upload")
         neg_cb.input(on_negative, [neg_cb, sc, nav, qe], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav, qe], FULL + COMFY_OUT, api_name="reload").then(
-            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_reload")
-        SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row]
-        save_btn.click(partial(do_save, False), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT, api_name="save")
-        ext_over_btn.click(partial(do_save, True), [sc, nav, slug_tb, name_tb, gen, gp, qe], SAVE_OUT,
-                           api_name="save_overwrite")
-        ext_reload_btn.click(on_ext_reload, [sc, nav, qe], FULL + [save_msg, ext_row], api_name="ext_reload").then(
-            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_ext_reload")
-        mkdir_btn.click(on_mkdir, [newdir_tb, nav], NAV_OUT + [newdir_tb], api_name="mkdir")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_reload").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_reload")
+        SAVE_IN = [sc, nav, sv, slug_tb, name_tb, gen, gp, qe]
+        SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row, sv]
+        over_btn.click(on_save_over, SAVE_IN, SAVE_OUT, api_name="save_overwrite").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_overwrite")
+        saveas_btn.click(on_save_as, SAVE_IN, SAVE_OUT, api_name="save_as").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_save_as")
+        confirm_ok_btn.click(on_confirm, SAVE_IN, SAVE_OUT, api_name="save_confirm").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_confirm")
+        confirm_cancel_btn.click(on_cancel, [sv], SAVE_OUT, api_name="save_cancel").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_cancel")
+        ext_over_btn.click(on_ext_over, SAVE_IN, SAVE_OUT, api_name="save_ext_overwrite").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_overwrite")
+        ext_reload_btn.click(on_ext_reload, [sc, nav, sv, qe], FULL + [save_msg, ext_row, sv],
+                             api_name="ext_reload").then(
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_ext_reload").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_reload")
+        folder_rd.input(on_sv_move, [folder_rd, sc, sv], [sv] + SV_VIEW, api_name="sv_move")
+        scene_rd.input(on_sv_select, [scene_rd, sc, sv], SV_OUT, api_name="sv_select")
+        mkdir_btn.click(on_mkdir, [newdir_tb, sc, sv], SV_VIEW + [save_msg, newdir_tb], api_name="mkdir")
         demo.load(on_load, [sc, nav, qe], FULL + COMFY_OUT, api_name="init").then(
-            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_init")
+            refresh_gp, GP_IN, GP_OUT, api_name="gp_after_init").then(
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_init")
         for (stage, param), (sl, src, rb) in items.items():
             sl.release(partial(on_release, stage, param), [sl, gp], [gp, src, rb],
                        api_name=f"gp_set_{stage}_{param}")

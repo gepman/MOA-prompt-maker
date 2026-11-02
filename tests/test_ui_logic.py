@@ -42,7 +42,7 @@ def fill_cast(repo, sc, nav, cast: dict):
 # ---- 共有ブラウザ ----
 def test_initial_listing_for_each_target(repo):
     nav = L.new_nav()
-    assert nav["target"] == "scene" and nav["save_dir"] == "scenes"
+    assert nav["target"] == "scene"
     for target, root, first in (("scene", "scenes", "🎬 海辺で談笑（ポケモントリオ）（beach_chat__trio.yaml）"),
                                 ("action", "actions", "📄 海辺で談笑（beach_chat.yaml）"),
                                 ("background", "backgrounds", "📄 海辺（beach.yaml）"),
@@ -269,45 +269,28 @@ def test_upload_unknown_id_wrong_kind_and_bad_yaml(repo, tmp_path):
     assert "索引にありません" in L.from_upload(repo, L.new_sc(), nav, str(character))[2]     # actions の索引に elesa_bw はない
     assert L.from_upload(repo, L.new_sc(), nav, str(write(tmp_path / "b.yaml", "a: [unclosed\n")))[2].startswith("⚠")
     assert "id がありません" in L.from_upload(repo, L.new_sc(), nav, str(write(tmp_path / "n.yaml", "a: 1\n")))[2]
-    assert L.from_upload(repo, L.new_sc(), L.set_target(L.new_nav(), "savedir"), str(unknown))[2].startswith("⚠")
 
 
-# ---- 保存（10章）----
-def test_the_save_destination_is_chosen_from_the_scenes_tree(repo, data_dir):
-    nav = L.set_target(L.new_nav(), "savedir")
-    assert L.savedir_text(repo, nav) == "新規 Scene の保存先：`scenes/`"
-    write(data_dir / "scenes" / "pokemon" / "_folder.yaml", "name: ポケモン\n")
-    write(data_dir / "scenes" / "pokemon" / "x.yaml", "id: x\nbackground: beach\naction: beach_solo\ncast:\n  solo: {character: elesa_bw}\n")
-    repo.reload()
-
-    choices, _ = L.listing(repo, nav)
-    assert [v for _, v in choices] == ["dir:scenes/pokemon"]                  # フォルダだけ。Scene ファイルは出さない
-    assert "フォルダを選んでください" in L.apply_entry(repo, L.new_sc(), nav, repo.entry("scene", "x"))[2]
-
-    sc, nav, _ = L.browse(repo, L.new_sc(), nav, "dir:scenes/pokemon")
-    nav, msg = L.choose_savedir(repo, nav)
-    assert nav["save_dir"] == "scenes/pokemon" and "scenes/pokemon/" in msg
-    assert L.savedir_text(repo, nav) == "新規 Scene の保存先：`scenes/pokemon/`"
-    assert "先に" in L.choose_savedir(repo, L.set_target(nav, "char", "a"))[1]       # 選択先が違うと押せない
+# ---- 保存（10.2章。保存先の選び方・初期値は tests/test_saveblock.py）----
+def new_target(repo, scene_id, folder=None):
+    return L.SaveTarget(scene_id, folder=folder or repo.root_dir("scene"))
 
 
-def test_the_save_dir_never_leaves_the_scenes_root(repo):
-    root = (repo.root / "scenes").resolve()
-    nav = L.new_nav()
-    nav["save_dir"] = "scenes/not_created_yet"                                      # scenes/ 配下なら使う（保存時に作られる）
-    assert L.save_dir_path(repo, nav) == root / "not_created_yet"
-    for outside in ("characters", "scenes/../characters", "..", "../elsewhere"):
-        nav["save_dir"] = outside
-        assert L.save_dir_path(repo, nav) == root, outside                           # scenes/ の外は使わない
+def over_target(repo, scene_id="beach_chat__trio"):
+    return L.SaveTarget(scene_id, path=repo.path_of("scene", scene_id))
+
+
+def save_new(repo, sc, scene_id, name="", generated=None, folder=None, **kw):
+    """新しいファイルとして保存する（folder 省略時は scenes/ 直下）。"""
+    return L.save(repo, sc, new_target(repo, scene_id, folder), name, generated, **kw)
 
 
 def test_new_scene_is_saved_in_the_chosen_folder_and_the_full_path_is_shown(repo, data_dir):
     sc, nav, _ = new_draft(repo, "beach_solo")
     sc, nav = fill_cast(repo, sc, nav, {"solo": "skyla_bw"})
-    nav = {**nav, "save_dir": "scenes/pokemon"}
-    sc2, msg = L.save(repo, sc, nav, "beach_solo__skyla", "スカイラ", None)
+    sc2, msg = save_new(repo, sc, "beach_solo__skyla", "スカイラ", folder=data_dir / "scenes" / "pokemon")
     path = data_dir.resolve() / "scenes" / "pokemon" / "beach_solo__skyla.yaml"
-    assert path.exists() and f"新規保存しました：`{path}`" in msg                          # フルパスを表示する
+    assert path.exists() and f"保存しました：`{path}`" in msg                              # フルパスを表示する
     assert sc2["scene_id"] == "beach_solo__skyla" and sc2["scene_name"] == "スカイラ"
     data = load_yaml(path)
     assert (data["background"], data["action"], data["name"]) == ("beach", "beach_solo", "スカイラ")
@@ -315,62 +298,19 @@ def test_new_scene_is_saved_in_the_chosen_folder_and_the_full_path_is_shown(repo
     assert errors(Repository(data_dir).issues) == []
 
 
-def test_an_empty_id_saves_with_a_number_and_never_overwrites(repo, data_dir):
-    trio = data_dir / "scenes" / "beach_chat__trio.yaml"
-    before = trio.read_text(encoding="utf-8")
-    sc, nav, _ = open_scene(repo)
-
-    sc1, msg = L.save(repo, sc, nav, "", "", None)                    # 開いているのは trio → trio_1
-    assert sc1["scene_id"] == "beach_chat__trio_1" and "新規保存" in msg
-    sc2, _ = L.save(repo, sc1, nav, "  ", "", None)                   # trio_1 から → trio_2（_1 を重ねない）
-    assert sc2["scene_id"] == "beach_chat__trio_2"
-    sc3, _ = L.save(repo, sc, nav, "", "", None)                      # trio から再度 → 空き番号の trio_3
-    assert sc3["scene_id"] == "beach_chat__trio_3"
-    assert trio.read_text(encoding="utf-8") == before                 # 元の Scene は無傷
-
-
-def test_an_empty_id_without_an_opened_scene_uses_the_action_id(repo):
-    sc, nav, _ = new_draft(repo)
-    sc, nav = fill_cast(repo, sc, nav, {"left": "skyla_bw", "center": "elesa_bw", "right": "hex_maniac_xy"})
-    sc2, msg = L.save(repo, sc, nav, "", "", None)
-    assert sc2["scene_id"] == "beach_chat__scene_1" and "新規保存" in msg
-
-
-def test_the_number_skips_files_that_exist_but_are_not_indexed(repo, data_dir):
-    write(data_dir / "scenes" / "beach_chat__trio_1.yaml", "this is not a scene: [")       # 読み込めないが存在する
-    repo.reload()
-    sc, nav, _ = open_scene(repo)
-    assert L.save(repo, sc, nav, "", "", None)[0]["scene_id"] == "beach_chat__trio_2"
-
-
-def test_overwrite_only_when_the_same_id_is_given_explicitly(repo, data_dir):
-    sc, nav, _ = open_scene(repo)
-    sc["cast"]["left"]["character"] = "elesa_bw"
-    sc2, msg = L.save(repo, sc, nav, "beach_chat__trio", "", None)
-    assert "上書き保存しました" in msg
-    assert Repository(data_dir).scene("beach_chat__trio").cast["left"].character == "elesa_bw"
-
-
-def test_overwriting_ignores_the_chosen_folder_and_keeps_the_scene_where_it_is(repo, data_dir):
-    sc, nav, _ = open_scene(repo)
-    nav = {**nav, "save_dir": "scenes/elsewhere"}
-    L.save(repo, sc, nav, "beach_chat__trio", "", None)
-    assert (data_dir / "scenes" / "beach_chat__trio.yaml").exists() and not (data_dir / "scenes" / "elsewhere").exists()
-
-
 @pytest.mark.parametrize("scene_id", ["Bad Name", "日本語", "a-b"])
 def test_an_invalid_id_is_rejected(repo, scene_id):
     sc, nav, _ = open_scene(repo)
-    assert "半角英小文字" in L.save(repo, sc, nav, scene_id, "", None)[1]
+    assert "半角英小文字" in save_new(repo, sc, scene_id)[1]
 
 
 def test_save_guards(repo):
-    assert "Action が未選択" in L.save(repo, L.new_sc(), L.new_nav(), "x", "", None)[1]
+    assert "Action が未選択" in save_new(repo, L.new_sc(), "x")[1]
     sc, nav, _ = new_draft(repo)
     sc, nav = fill_cast(repo, sc, nav, {"left": "skyla_bw"})                 # 右が未選択
-    assert "検証エラー" in L.save(repo, sc, nav, "ok", "", None)[1]
+    assert "検証エラー" in save_new(repo, sc, "ok")[1]
     sc["background_id"] = None
-    assert "Background が未選択" in L.save(repo, sc, nav, "ok", "", None)[1]
+    assert "Background が未選択" in save_new(repo, sc, "ok")[1]
 
 
 # ---- 生成結果の記録（13.4章）----
@@ -394,7 +334,7 @@ def test_a_matching_generation_is_recorded_with_seed_images_and_the_used_gen(rep
     sc, nav, _ = open_scene(repo)
     gp = L.sync_gp(sc, L.new_gp())
     eff = effective_gen(_cfg(), gp["gen"])
-    _, msg = L.save(repo, sc, nav, "rec", "", snapshot_for(repo, sc, gp), gen_params=gp["gen"], effective=eff)
+    _, msg = save_new(repo, sc, "rec", "", snapshot_for(repo, sc, gp), gen_params=gp["gen"], effective=eff)
     c = saved(data_dir, "rec")["compiled"]
     assert "🖼" in msg and "4242" in msg
     assert (c["seed"], c["images"], c["gen"]) == (4242, ["output/m.png", "output/a.png"], eff) and "partial" not in c
@@ -403,7 +343,7 @@ def test_a_matching_generation_is_recorded_with_seed_images_and_the_used_gen(rep
 def test_a_partial_result_is_recorded_as_partial(repo, data_dir):
     sc, nav, _ = open_scene(repo)
     gp = L.sync_gp(sc, L.new_gp())
-    _, msg = L.save(repo, sc, nav, "part", "", snapshot_for(repo, sc, gp, partial=True), gen_params=gp["gen"],
+    _, msg = save_new(repo, sc, "part", "", snapshot_for(repo, sc, gp, partial=True), gen_params=gp["gen"],
                     effective=effective_gen(_cfg(), gp["gen"]))
     c = saved(data_dir, "part")["compiled"]
     assert c["partial"] is True and c["images"] == ["output/m.png"] and "部分結果" in msg
@@ -412,7 +352,7 @@ def test_a_partial_result_is_recorded_as_partial(repo, data_dir):
 def test_a_failed_moss_stage_records_nothing(repo, data_dir):
     sc, nav, _ = open_scene(repo)
     snap = snapshot_for(repo, sc, images=[], failed_stage="moss", partial=False)
-    L.save(repo, sc, nav, "none", "", snap, gen_params={}, effective=effective_gen(_cfg(), {}))
+    save_new(repo, sc, "none", "", snap, gen_params={}, effective=effective_gen(_cfg(), {}))
     c = saved(data_dir, "none")["compiled"]
     assert c["seed"] is None and c["images"] == []
 
@@ -437,7 +377,7 @@ def test_a_changed_item_blocks_recording_and_is_named(repo, data_dir, change, na
         sc["background_id"] = "wide"
     else:
         gp = L.set_override(gp, "anima", "steps", 20)                 # 生成後にスライダーを動かした
-    _, msg = L.save(repo, sc, nav, "blocked", "", snap, gen_params=gp["gen"], effective=effective_gen(_cfg(), gp["gen"]))
+    _, msg = save_new(repo, sc, "blocked", "", snap, gen_params=gp["gen"], effective=effective_gen(_cfg(), gp["gen"]))
     c = saved(data_dir, "blocked")["compiled"]
     assert c["seed"] is None and c["images"] == [] and "gen" not in c
     assert "記録していません" in msg and all(n in msg for n in named), msg
@@ -485,9 +425,9 @@ def test_override_clear_and_param_state(repo):
 def test_only_the_overridden_items_are_saved_as_scene_gen(repo, data_dir):
     sc, nav, _ = new_draft(repo, "beach_solo")
     sc, nav = fill_cast(repo, sc, nav, {"solo": "elesa_bw"})
-    L.save(repo, sc, nav, "g1", "", None, gen_params={"moss": {"steps": 20}, "anima": {"denoise": 0.45}})
+    save_new(repo, sc, "g1", "", None, gen_params={"moss": {"steps": 20}, "anima": {"denoise": 0.45}})
     assert saved(data_dir, "g1")["gen"] == {"moss": {"steps": 20}, "anima": {"denoise": 0.45}}
-    L.save(repo, sc, nav, "g2", "", None, gen_params={})
+    save_new(repo, sc, "g2", "", None, gen_params={})
     assert "gen" not in saved(data_dir, "g2")
 
 
@@ -501,8 +441,8 @@ def _bump(path):
 def test_opening_a_scene_notes_that_master_data_changed(repo, data_dir):
     sc, nav, msg = open_scene(repo)
     assert "保存時から内容が変わっています" not in msg                 # compiled が無い Scene では表示しない
-    sc, msg = L.save(repo, sc, nav, "beach_chat__trio", "", None)
-    assert "上書き保存" in msg
+    sc, msg = L.save(repo, sc, over_target(repo), "", None)
+    assert "保存しました" in msg
     repo.reload()
     assert "保存時から内容が変わっています" not in open_scene(repo)[2]
 
@@ -520,19 +460,8 @@ def test_opening_a_scene_notes_that_master_data_changed(repo, data_dir):
 def test_a_new_scene_does_not_get_gen_written(repo, data_dir):
     sc, nav, _ = new_draft(repo, "beach_solo")
     sc, nav = fill_cast(repo, sc, nav, {"solo": "skyla_bw"})
-    L.save(repo, sc, nav, "beach_solo__nogen", "", None)
+    save_new(repo, sc, "beach_solo__nogen", "", None)
     assert "gen" not in load_yaml(data_dir / "scenes" / "beach_solo__nogen.yaml")        # 動かした項目だけ書く
-
-
-def test_save_dir_folder_creation_uses_the_shared_name_rules(repo, data_dir):
-    nav = L.new_nav()
-    assert L.make_savedir(repo, nav, "新規").startswith("⚠")                              # 保存先を選ぶ画面を開いていない
-    nav = L.set_target(nav, "savedir")
-    for bad in ("CON", "con.txt", "_x", ".x", "a?b", "末尾.", ""):
-        assert L.make_savedir(repo, nav, bad).startswith("⚠"), bad
-    assert L.make_savedir(repo, nav, "ポケモン").startswith("📁")
-    assert (data_dir / "scenes" / "ポケモン").is_dir()
-    assert L.make_savedir(repo, nav, "ポケモン").startswith("⚠")                          # 同名は不可
 
 
 def test_scene_save_detects_external_change_and_offers_two_choices(repo, data_dir):
@@ -541,15 +470,15 @@ def test_scene_save_detects_external_change_and_offers_two_choices(repo, data_di
     path.write_text(path.read_text(encoding="utf-8") + "# 外部で追記\n", encoding="utf-8")
     _bump(path)
 
-    sc2, msg = L.save(repo, sc, nav, "beach_chat__trio", "外部変更の後", None)
+    sc2, msg = L.save(repo, sc, over_target(repo), "外部変更の後", None)
     assert msg.startswith(L.EXTERNAL_PREFIX)
     assert "外部変更の後" not in path.read_text(encoding="utf-8")                          # 止まった
 
-    sc3, msg = L.save(repo, sc, nav, "beach_chat__trio", "外部変更の後", None, force=True)   # [上書き保存]
-    assert "上書き保存しました" in msg and load_yaml(path)["name"] == "外部変更の後"
+    sc3, msg = L.save(repo, sc, over_target(repo), "外部変更の後", None, force=True)   # [上書き保存]
+    assert "保存しました" in msg and load_yaml(path)["name"] == "外部変更の後"
 
     path.write_text(path.read_text(encoding="utf-8") + "# もう一度\n", encoding="utf-8")
     _bump(path)
-    assert L.save(repo, sc3, nav, "beach_chat__trio", "", None)[1].startswith(L.EXTERNAL_PREFIX)
+    assert L.save(repo, sc3, over_target(repo), "", None)[1].startswith(L.EXTERNAL_PREFIX)
     sc4, nav4, msg = L.reopen_scene(repo, sc3, nav)                                       # [再読み込み（編集を破棄）]
-    assert "開きました" in msg and "上書き保存しました" in L.save(repo, sc4, nav4, "beach_chat__trio", "", None)[1]
+    assert "開きました" in msg and "保存しました" in L.save(repo, sc4, over_target(repo), "", None)[1]
