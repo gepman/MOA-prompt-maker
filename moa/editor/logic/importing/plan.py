@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,8 +14,9 @@ from moa.core.constants import ID_RE, NONE
 from moa.core.models import MISSING_REF, Action, Background, Character, Issue, Outfit, Scene
 from moa.core.overlay import OverlayRepository
 from moa.core.repository import KINDS, Repository
+from moa.core.usage import scenes_using_action, scenes_using_background
 from moa.core.validate import scene_overflow, validate_scene
-from moa.editor.logic.validation import id_taken, object_issues
+from moa.editor.logic.validation import id_taken, object_issues, slot_issues
 
 from .inspection import KIND_LABEL, Candidate, Inspection, _short
 from .source import FOLDER_FILE, ROOT_NAMES, Ignored
@@ -22,11 +24,12 @@ from .source import FOLDER_FILE, ROOT_NAMES, Ignored
 # ファイルごとの結果
 CREATE = "create"                    # 新規に取り込む
 RENAMED = "create_renamed"           # 別 ID で取り込む
+OVERWRITE = "overwrite"              # 同じ id の既存ファイルを、取り込み側の内容で置き換える（確認画面で選んだものだけ）
 SKIP_SAME = "skip_same"              # すでに同じ内容がある
 SKIP_CHOICE = "skip_choice"          # 同じ id があり、スキップを選んだ（初期値）
 SKIP_UNSELECTED = "skip_unselected"  # 種類が複数あり、選ばれていない
 REJECT = "reject"
-WRITES = (CREATE, RENAMED)
+WRITES = (CREATE, RENAMED, OVERWRITE)
 
 # フォルダ設定（_folder.yaml）の結果
 F_CREATE = "create"        # バッチのものをそのまま書く
@@ -45,6 +48,7 @@ class Choices:
     dest: dict[str, str] = field(default_factory=dict)    # 種類 → 配置先フォルダ（data からの相対パス）。無ければそのルート直下
     kinds: dict[str, str] = field(default_factory=dict)   # ファイルのパス → 選んだ種類（複数に適合するとき）
     rename: dict[str, str] = field(default_factory=dict)  # ファイルのパス → 別 ID（空・無しならスキップ）
+    overwrite: set[str] = field(default_factory=set)      # 既存を上書きするファイルのパス（無ければスキップ）
     desc: dict[str, str] = field(default_factory=dict)    # フォルダ（相対パス）→ "existing" | "import"
     label: dict[str, bool] = field(default_factory=dict)  # フォルダ（相対パス）→ 表示名を付ける
 
@@ -62,6 +66,8 @@ class Item:
     conflict: bool = False          # 同じ id が既にあり、中身が違う
     existing: str = ""              # その既存ファイル（data からの相対パス）
     suggested: str = ""             # 別 ID の初期値
+    existing_path: Path | None = None   # 既存のファイル（上書きの書き込み先）
+    existing_sig: str = ""          # 既存ファイルの中身の指紋（確認画面のあとに変わっていないかの確認用）
     candidates: list[str] = field(default_factory=list)   # 種類の候補（複数に適合するとき）
     by_choice: bool = False         # 配置先を選ぶ必要がある（一番上がルート名でない）
 
@@ -101,6 +107,14 @@ class Plan:
 
     def item(self, path: str) -> Item | None:
         return next((i for i in self.items if i.path == path), None)
+
+
+def _sig(path: Path | None) -> str:
+    """ファイルの中身の指紋。読めなければ空文字。"""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path is not None else ""
+    except OSError:
+        return ""
 
 
 def _suggest(repo: Repository, kind: str, eid: str, used: dict[str, set[str]]) -> str:
@@ -203,7 +217,9 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
             it.reason = f"すでに同じ内容があります（{repo.rel(existing.path)}）"
         elif existing is not None or stray is not None:
             it.conflict = True
-            it.existing = repo.rel(existing.path if existing is not None else stray)
+            it.existing_path = existing.path if existing is not None else stray
+            it.existing = repo.rel(it.existing_path)
+            it.existing_sig = _sig(it.existing_path)
             conflicts.append(it)
         else:
             it.action, it.final_id = CREATE, it.id
@@ -211,6 +227,14 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
     for it in conflicts:
         it.suggested = _suggest(repo, it.kind, it.id, used)
         new = (choices.rename.get(it.path) or "").strip()
+        wants_rename = it.path in choices.rename
+        if it.path in choices.overwrite:
+            if wants_rename:
+                it.action, it.reason = REJECT, "「上書きする」と「別IDで取り込む」は同時に選べません。どちらか一方にしてください"
+            else:
+                it.action, it.final_id, it.dest = OVERWRITE, it.id, it.existing_path
+                it.reason = f"既存のファイルを上書きします（{it.existing}）"
+            continue
         if not new:
             it.action = SKIP_CHOICE
             it.reason = f"同じ id が既にあり、中身が違います（既存：{it.existing}）。スキップします（別 ID で取り込むこともできます）"
@@ -238,6 +262,8 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
         again = False
         for it in alive:
             issues = _validate(ov, it.kind, objs[it.path])
+            if it.action == OVERWRITE and it.kind == "action":   # 参照中の Action のスロットは、保存時と同じ規則で守る
+                issues = issues + slot_issues(repo, it.id, list(objs[it.path].slots))
             issues_of[it.path] = issues
             errors = [i.message for i in issues if i.level == "error" and i.code != MISSING_REF]
             if errors:
@@ -249,6 +275,12 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
     for it in items:
         if not it.writes:
             continue
+        if it.action == OVERWRITE:
+            users = {"background": scenes_using_background, "action": scenes_using_action}.get(it.kind)
+            used = users(repo, it.id) if users else []
+            if used:
+                it.warnings.append(f"上書きする{KIND_LABEL[it.kind]}は {len(used)} 件の Scene が使っています："
+                                   + "、".join(e.id for e in used))
         for i in issues_of[it.path]:
             if i.level == "warning":
                 it.warnings.append(i.message)
@@ -275,6 +307,8 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
     for it in items:
         c = cands[it.path]
         it.by_choice = not (c.parts and c.parts[0] in ROOT_NAMES)
+        if it.action == OVERWRITE:
+            continue   # 書き込み先は既存のファイルそのもの（配置先の選択には依存しない）
         if it.writes:
             folder = repo.root.joinpath(*c.parts) if not it.by_choice else base_dir(it.kind).joinpath(*c.parts)
             it.dest = folder / f"{it.final_id}.yaml"
@@ -285,7 +319,7 @@ def resolve(repo: Repository, insp: Inspection, choices: Choices | None = None) 
 
     # 6. フォルダ設定（_folder.yaml）
     def new_files_in(folder: Path) -> list[str]:
-        return [f"{i.final_id}.yaml" for i in items if i.writes and i.dest is not None
+        return [f"{i.final_id}.yaml" for i in items if i.action in (CREATE, RENAMED) and i.dest is not None
                 and i.dest.parent.resolve() == folder.resolve()]
 
     for c in insp.candidates:

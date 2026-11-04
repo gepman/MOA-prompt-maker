@@ -16,12 +16,13 @@ from moa.editor.logic import picker as PK
 from moa.editor.logic.importing import (Choices, Inspection, apply_plan, choices_from_tables, folder_dialog_blocked,
                                         inspect_batch, read_batch, resolve, result_rows, summary_md)
 from moa.editor.logic.importing import report as R
+from moa.editor.logic.importing.plan import OVERWRITE
 from moa.ui.dialogs import pick_folder
 
 ROOT_DIR = PK.ROOT_DIR
 LABEL = PK.IMPORT_LABEL
 INTRO = ("外部で作った MOA ファイル集（Character / Outfit / Background / Action / Scene と `_folder.yaml`）を、既存のフォルダ階層に**追加**します。"
-         "検査を通ったものだけを取り込み、**既存のファイルは上書きしません**。手順は 検査（書き込まない）→ 確認 → 取り込み です。")
+         "検査を通ったものだけを取り込みます。**同じ id の既存ファイルは、既定ではスキップ**し、ファイルごとに中身（差分）を確認して［OK］を押したものだけ上書きします。手順は 検査（書き込まない）→ 確認 → 取り込み です。")
 
 
 def _table(headers: list[str], datatype: list[str], static: list[int], label: str, **kw) -> gr.Dataframe:
@@ -36,6 +37,7 @@ def build_import_section() -> dict:
         gr.Markdown(INTRO)
         imp["source"] = gr.State(None)     # {"kind": "upload" | "folder", "path": ...}
         imp["insp"] = gr.State(None)       # 検査の結果（確認画面を出している間だけ持つ）
+        imp["ow"] = gr.State([])           # 中身を確認して OK を押した（上書きにする）ファイルのパス
         imp["plan"] = gr.State(None)       # 確認画面に出している計画（書き込み直前に、作り直した計画と比べる）
         with gr.Row():
             imp["file"] = gr.File(label="アップロード（.yaml または .zip）", file_types=[".yaml", ".zip"], file_count="single",
@@ -51,8 +53,17 @@ def build_import_section() -> dict:
             gr.Markdown("### 確認\n選ぶ必要があるものだけが表示されます。選んだら［確認を更新］で結果を作り直せます。")
             imp["kinds_df"] = _table(R.KINDS_HEADERS, ["str"] * 3, [0, 1],
                                      "種類を選ぶ（複数の種類に適合するファイル）：「取り込む種類」に候補のどれかを入力。空のままなら取り込みません")
-            imp["conf_df"] = _table(R.CONFLICT_HEADERS, ["str", "str", "str", "str", "bool", "str"], [0, 1, 2, 3],
-                                    "同じ id が既にあるファイル：既定はスキップ。「別IDで取り込む」にチェックし、新しい ID を入力")
+            imp["conf_df"] = _table(R.CONFLICT_HEADERS, ["str", "str", "str", "str", "str", "bool", "str"], [0, 1, 2, 3, 4],
+                                    "同じ id が既にあるファイル：既定はスキップ。上書きは、下で中身を確認して［OK］を押したものだけ。別IDで取り込むなら「別IDで取り込む」にチェックし、新しい ID を入力")
+            with gr.Group(visible=False) as peek_box:   # 競合ファイルの中身の確認（上書きする前に見る）
+                imp["peek_path"] = gr.Dropdown(label="中身を確認するファイル（同じ id が既にあるもの）", choices=[], value=None,
+                                               interactive=True)
+                imp["peek_mode"] = gr.Radio(R.PEEK_MODES, value=R.PEEK_DIFF, label="表示")
+                imp["peek_html"] = gr.HTML()
+                with gr.Row():
+                    imp["ow_ok"] = gr.Button("✅ OK：この内容で、このファイルを上書きにする", variant="stop")
+                    imp["ow_cancel"] = gr.Button("↩ 上書きをやめる（スキップに戻す）")
+            imp["peek_box"] = peek_box
             for k in KINDS:
                 with gr.Row(visible=False) as row:
                     imp[f"dest_show_{k}"] = gr.Markdown()
@@ -75,7 +86,8 @@ def build_import_section() -> dict:
 
 def view_components(imp: dict) -> list:
     """確認画面の表示・状態に関わる部品（イベントの outputs に使う）。"""
-    names = ["summary", "box", "kinds_df", "conf_df", "desc_df", "label_df", "result_df", "insp", "plan", "msg"]
+    names = ["summary", "box", "kinds_df", "conf_df", "desc_df", "label_df", "result_df", "insp", "plan", "msg",
+             "peek_box", "peek_path", "peek_html", "ow"]
     comps = [imp[n] for n in names]
     for k in KINDS:
         comps += [imp[f"dest_row_{k}"], imp[f"dest_show_{k}"], imp[f"dest_{k}"]]
@@ -86,7 +98,8 @@ def dest_text(kind: str, rel: str) -> str:
     return f"**{LABEL[kind]}の取り込み先**：`{rel or ROOT_DIR[kind] + '/（直下）'}`"
 
 
-def render(repo: Repository, imp: dict, insp, plan, choices: Choices, *, done: bool, reset_dest: bool = False) -> dict:
+def render(repo: Repository, imp: dict, insp, plan, choices: Choices, *, done: bool, reset_dest: bool = False,
+           peek_path: str | None = None, peek_mode: str = R.PEEK_DIFF) -> dict:
     """検査・確認の結果を、画面の更新（{部品: 値}）にする。"""
     tables = {"kinds_df": R.kinds_rows(plan, choices), "conf_df": R.conflict_rows(plan, choices),
               "desc_df": R.desc_rows(plan, choices), "label_df": R.label_rows(plan, choices)}
@@ -94,6 +107,12 @@ def render(repo: Repository, imp: dict, insp, plan, choices: Choices, *, done: b
            imp["box"]: gr.update(visible=insp is not None and plan.error is None and not done),
            imp["result_df"]: gr.update(value=result_rows(repo, plan, done), visible=plan.error is None),
            imp["insp"]: None if done else insp, imp["plan"]: None if done else plan}
+    paths = [] if done else R.conflict_paths(plan)
+    shown = peek_path if peek_path in paths else (paths[0] if paths else None)   # 選んでいたファイルが残っていればそのまま
+    out[imp["peek_box"]] = gr.update(visible=bool(paths))
+    out[imp["peek_path"]] = gr.update(choices=paths, value=shown)
+    out[imp["peek_html"]] = R.peek_html(plan, insp, shown, peek_mode)
+    out[imp["ow"]] = [] if done else sorted(choices.overwrite)
     for name, rows in tables.items():
         out[imp[name]] = gr.update(value=rows, visible=bool(rows) and not done)
     for k in KINDS:
@@ -110,8 +129,8 @@ def wire_import(demo: gr.Blocks, repo: Repository, imp: dict, c: dict, OUT: list
     dest_states = [imp[f"dest_{k}"] for k in KINDS]
     TABLES = [imp["kinds_df"], imp["conf_df"], imp["desc_df"], imp["label_df"]]
 
-    def choices_of(dests, kinds, conf, descs, labels) -> Choices:
-        return choices_from_tables(dict(zip(KINDS, dests)), conf, kinds, descs, labels)
+    def choices_of(dests, kinds, conf, descs, labels, ow=()) -> Choices:
+        return choices_from_tables(dict(zip(KINDS, dests)), conf, kinds, descs, labels, ow)
 
     # ---- 入口 ----
     def on_file(path):
@@ -153,30 +172,61 @@ def wire_import(demo: gr.Blocks, repo: Repository, imp: dict, c: dict, OUT: list
     imp["inspect_btn"].click(on_inspect, [imp["source"]], VIEW, api_name="imp_inspect")
 
     # ---- 確認の更新 ----
-    def on_refresh(insp, *args):
+    def on_refresh(insp, ow, peek_path, peek_mode, *args):
         if insp is None:
             return {imp["msg"]: "⚠ 先に［検査］を押してください"}
         dests, tables = args[:len(KINDS)], args[len(KINDS):]
-        choices = choices_of(dests, *tables)
+        choices = choices_of(dests, *tables, ow)
         plan = resolve(repo, insp, choices)
-        out = render(repo, imp, insp, plan, choices, done=False)
+        out = render(repo, imp, insp, plan, choices, done=False, peek_path=peek_path, peek_mode=peek_mode)
         out[imp["msg"]] = "確認を更新しました"
         return out
 
-    imp["refresh_btn"].click(on_refresh, [imp["insp"]] + dest_states + TABLES, VIEW, api_name="imp_refresh")
+    # ---- 上書きへの切り替え：中身（差分）を表示したうえで［OK］を押したファイルだけ ----
+    def set_overwrite(on: bool):
+        def handler(insp, ow, peek_path, peek_mode, *args):
+            if insp is None:
+                return {imp["msg"]: "⚠ 先に［検査］を押してください"}
+            if not peek_path:
+                return {imp["msg"]: "⚠ 上書きにするファイルを選んでください"}
+            dests, tables = args[:len(KINDS)], args[len(KINDS):]
+            choices = choices_of(dests, *tables, ow)
+            if on and peek_path in choices.rename:
+                return {imp["msg"]: f"⚠ {peek_path} は「別IDで取り込む」にチェックされています。チェックを外してから上書きにしてください"}
+            choices.overwrite = (choices.overwrite | {peek_path}) if on else (choices.overwrite - {peek_path})
+            plan = resolve(repo, insp, choices)
+            out = render(repo, imp, insp, plan, choices, done=False, peek_path=peek_path, peek_mode=peek_mode)
+            out[imp["msg"]] = (f"✅ {peek_path} を上書きにしました（［取り込む］で既存のファイルを置き換えます）" if on
+                               else f"{peek_path} をスキップに戻しました")
+            return out
+        return handler
+
+    PEEK_IN = [imp["insp"], imp["ow"], imp["peek_path"], imp["peek_mode"]] + dest_states + TABLES
+    imp["refresh_btn"].click(on_refresh, PEEK_IN, VIEW, api_name="imp_refresh")
+    imp["ow_ok"].click(set_overwrite(True), PEEK_IN, VIEW, api_name="imp_ow_ok")
+    imp["ow_cancel"].click(set_overwrite(False), PEEK_IN, VIEW, api_name="imp_ow_cancel")
+
+    # ---- 競合ファイルの中身の確認（選んだときだけ。キー入力ごとには動かさない）----
+    def on_peek(insp, plan, path, mode):
+        return {imp["peek_html"]: R.peek_html(plan, insp, path, mode) if insp is not None and plan is not None else ""}
+
+    for comp, name in ((imp["peek_path"], "imp_peek_path"), (imp["peek_mode"], "imp_peek_mode")):
+        comp.input(on_peek, [imp["insp"], imp["plan"], imp["peek_path"], imp["peek_mode"]], [imp["peek_html"]], api_name=name)
 
     # ---- 書き込み ----
-    def on_apply(insp, confirmed, st_v, *args):
+    def on_apply(insp, confirmed, ow, st_v, *args):
         if insp is None:
             return {imp["msg"]: "⚠ 先に［検査］を押してください"}
         dests, tables = args[:len(KINDS)], args[len(KINDS):]
-        choices = choices_of(dests, *tables)
+        choices = choices_of(dests, *tables, ow)
         plan = apply_plan(repo, insp, choices, confirmed=confirmed)   # 書き込み直前に、索引を読み直して再確認する
         out = render(repo, imp, insp, plan, choices, done=True)
-        out[imp["msg"]] = "📥 取り込みを実行しました。結果は下の表を確認してください（既存のファイルは上書きしていません）"
+        n = sum(1 for i in plan.items if i.action == OVERWRITE)
+        out[imp["msg"]] = ("📥 取り込みを実行しました。結果は下の表を確認してください（" +
+                           (f"上書きしたファイル {n} 件以外の" if n else "") + "既存のファイルは上書きしていません）")
         return out | tree_part(st_v)
 
-    imp["apply_btn"].click(on_apply, [imp["insp"], imp["plan"], c["st"]] + dest_states + TABLES,
+    imp["apply_btn"].click(on_apply, [imp["insp"], imp["plan"], imp["ow"], c["st"]] + dest_states + TABLES,
                            VIEW + [c["section"], c["crumbs"], c["lst"]], api_name="imp_apply")
 
     def on_cancel():

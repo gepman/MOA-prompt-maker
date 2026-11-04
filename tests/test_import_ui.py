@@ -56,10 +56,10 @@ def test_a_conflict_is_edited_in_the_table_and_imported_with_a_new_id(d, data_di
     d.call("imp_inspect")
     assert d.update_of("imp_conf_df")["visible"] is True
     rows = d["imp_conf_df"]
-    assert rows[0][4] is False and rows[0][5] == "elesa_bw_copy"                          # 既定はスキップ。新 ID の初期値は _copy
+    assert rows[0][4] == "スキップ" and rows[0][5] is False and rows[0][6] == "elesa_bw_copy"                          # 既定はスキップ。新 ID の初期値は _copy
     assert "スキップ 1 件" in d["imp_summary"]
 
-    rows[0][4] = True                                                                       # 「別IDで取り込む」にチェック
+    rows[0][5] = True                                                                       # 「別IDで取り込む」にチェック
     d["imp_conf_df"] = rows
     d.call("imp_refresh")
     assert "別ID 1 件" in d["imp_summary"] and "確認を更新しました" in d["imp_msg"]
@@ -189,3 +189,49 @@ def test_there_is_no_path_text_input_and_the_shown_path_is_read_only(repo):
     assert demo.named["imp_dir_show"].interactive is False
     texts = [n for n, comp in demo.named.items() if n.startswith("imp_") and type(comp).__name__ == "Textbox"]
     assert texts == ["imp_dir_show"]                                                           # パスの手入力欄は作らない
+
+
+def test_a_conflict_becomes_an_overwrite_only_after_pressing_ok_on_the_shown_diff(d, data_dir, tmp_path):
+    original = (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8")
+    changed = original.replace("カミツレ（BW版）", "別物", 1)
+    d.call("imp_file", str(make_zip(tmp_path, {"characters/elesa_bw.yaml": changed})))
+    d.call("imp_inspect")
+    assert d["imp_conf_df"][0][4] == "スキップ"                                               # 既定はスキップ
+    assert "差分" not in d["imp_msg"] and "別物" in d["imp_peek_html"]                         # 切り替える前に、中身（差分）が出ている
+    d.call("imp_ow_ok")                                                                     # 差分を見て［OK］
+    assert d["imp_conf_df"][0][4] == "上書き" and "上書き 1 件" in d["imp_summary"] and "上書きにしました" in d["imp_msg"]
+    assert d["imp_ow"] == ["characters/elesa_bw.yaml"]
+    d.call("imp_apply")
+    assert (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8") == changed
+    assert dict((r[0], r[1]) for r in d["imp_result_df"])["characters/elesa_bw.yaml"].startswith("取り込んだ（上書き）")
+
+
+def test_the_peek_shows_the_diff_of_a_conflict_before_overwriting(d, data_dir, tmp_path):
+    original = (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8")
+    d.call("imp_file", str(make_zip(tmp_path, {"characters/elesa_bw.yaml": original.replace("カミツレ（BW版）", "別物", 1)})))
+    d.call("imp_inspect")
+    assert d.update_of("imp_peek_box")["visible"] is True
+    assert "別物" in d["imp_peek_html"] and "<ins" in d["imp_peek_html"]                 # 先頭の競合ファイルが最初から出る
+    d["imp_peek_mode"] = "既存の全文"
+    d.call("imp_peek_mode")
+    assert "カミツレ（BW版）" in d["imp_peek_html"] and "<ins" not in d["imp_peek_html"]
+
+
+def test_ok_can_be_undone_and_is_refused_while_a_new_id_is_ticked(d, data_dir, tmp_path):
+    original = (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8")
+    changed = original.replace("カミツレ（BW版）", "別物", 1)
+    d.call("imp_file", str(make_zip(tmp_path, {"characters/elesa_bw.yaml": changed})))
+    d.call("imp_inspect")
+    rows = d["imp_conf_df"]
+    rows[0][5] = True                                                                       # 別ID にチェック
+    d["imp_conf_df"] = rows
+    d.call("imp_ow_ok")
+    assert "チェックを外して" in d["imp_msg"] and d["imp_ow"] == []                          # 同時には切り替えない
+    rows[0][5] = False
+    d["imp_conf_df"] = rows
+    d.call("imp_ow_ok")
+    assert d["imp_ow"] == ["characters/elesa_bw.yaml"]
+    d.call("imp_ow_cancel")
+    assert d["imp_ow"] == [] and d["imp_conf_df"][0][4] == "スキップ"
+    d.call("imp_apply")
+    assert (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8") == original   # スキップに戻したので書き換わらない

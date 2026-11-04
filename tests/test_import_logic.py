@@ -554,3 +554,94 @@ def test_only_the_local_pc_may_open_the_folder_dialog():
     assert folder_dialog_blocked(Req("127.0.0.1")) == ""
     assert "PC 以外" in folder_dialog_blocked(Req("10.0.0.2")) and "10.0.0.2" in folder_dialog_blocked(Req("10.0.0.2"))
     assert "確認できません" in folder_dialog_blocked(Req(None)) and "確認できません" in folder_dialog_blocked(None)
+
+
+# ---- 上書き（ファイルごとに選んだものだけ。既定はスキップ）----
+def _changed_elesa(data_dir):
+    original = (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8")
+    return original, original.replace("カミツレ（BW版）", "別物 # 取り込み側のコメント", 1)
+
+
+def test_overwrite_replaces_only_the_chosen_file_with_the_original_text(repo, data_dir, tmp_path):
+    from moa.editor.logic.importing.plan import OVERWRITE
+    original, changed = _changed_elesa(data_dir)
+    other = (data_dir / "characters" / "skyla_bw.yaml").read_text(encoding="utf-8")
+    src = make_zip(tmp_path, {"characters/elesa_bw.yaml": changed, "characters/skyla_bw.yaml": other.replace("name:", "name: x", 1)})
+    _, plan = inspect(repo, src)
+    assert {i.action for i in plan.items} == {SKIP_CHOICE}                          # 既定はどちらもスキップ
+    done = do_import(repo, src, Choices(overwrite={"characters/elesa_bw.yaml"}))
+    assert by_path(done, "characters/elesa_bw.yaml").action == OVERWRITE
+    assert by_path(done, "characters/skyla_bw.yaml").action == SKIP_CHOICE          # 選ばなかった方は触らない
+    assert (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8") == changed   # コメントごとそのまま
+    assert (data_dir / "characters" / "skyla_bw.yaml").read_text(encoding="utf-8") == other
+    assert not list(data_dir.rglob("*.tmp")) and not (data_dir / "characters" / "elesa_bw_copy.yaml").exists()
+
+
+def test_overwrite_writes_to_the_existing_file_even_in_a_subfolder_and_ignores_the_chosen_destination(repo, data_dir, tmp_path):
+    write(data_dir / "backgrounds" / "sub" / "newbg.yaml", BG.replace("新背景", "古い"))
+    repo.reload()
+    src = single(tmp_path, BG)                                                         # ルート名が無い → 配置先を選ぶ種類
+    done = do_import(repo, src, Choices(overwrite={"x.yaml"}, dest={"background": ""}))
+    assert done.items[0].action == "overwrite" and done.needs_dest == []
+    assert (data_dir / "backgrounds" / "sub" / "newbg.yaml").read_text(encoding="utf-8") == BG
+    assert not (data_dir / "backgrounds" / "newbg.yaml").exists()
+
+
+def test_overwrite_and_new_id_cannot_be_chosen_together(repo, data_dir, tmp_path):
+    original, changed = _changed_elesa(data_dir)
+    src = make_zip(tmp_path, {"characters/elesa_bw.yaml": changed})
+    p = "characters/elesa_bw.yaml"
+    done = do_import(repo, src, Choices(overwrite={p}, rename={p: "elesa_bw_copy"}))
+    assert done.items[0].action == REJECT and "同時に選べません" in done.items[0].reason
+    assert (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8") == original
+
+
+def test_an_overwrite_that_fails_validation_is_rejected_and_leaves_the_existing_file(repo, data_dir, tmp_path):
+    original = (data_dir / "actions" / "beach_chat.yaml").read_text(encoding="utf-8")
+    broken = original.replace("slots: [left, center, right]", "slots: [l, center, right]")
+    assert broken != original
+    done = do_import(repo, make_zip(tmp_path, {"actions/beach_chat.yaml": broken}), Choices(overwrite={"actions/beach_chat.yaml"}))
+    assert done.items[0].action == REJECT and "beach_chat__trio" in done.items[0].reason   # 参照中の Scene を壊すスロット削除は保存時と同じく却下
+    assert (data_dir / "actions" / "beach_chat.yaml").read_text(encoding="utf-8") == original
+
+
+def test_overwriting_a_used_background_warns_about_the_scenes(repo, data_dir, tmp_path):
+    original = (data_dir / "backgrounds" / "beach.yaml").read_text(encoding="utf-8")
+    changed = original + "\n# 変更\nmossCaption: 別の説明\n" if "mossCaption:" not in original else original.replace("mossCaption:", "mossCaption: 別 ", 1)
+    _, plan = inspect(repo, make_zip(tmp_path, {"backgrounds/beach.yaml": changed}), Choices(overwrite={"backgrounds/beach.yaml"}))
+    it = plan.items[0]
+    assert it.action == "overwrite" and any("Scene が使っています" in w for w in it.warnings)
+
+
+def test_an_existing_file_changed_after_confirmation_is_not_overwritten(repo, data_dir, tmp_path):
+    original, changed = _changed_elesa(data_dir)
+    src = make_zip(tmp_path, {"characters/elesa_bw.yaml": changed})
+    insp = inspect_batch(repo, read_batch(src))
+    choices = Choices(overwrite={"characters/elesa_bw.yaml"})
+    confirmed = resolve(repo, insp, choices)
+    (data_dir / "characters" / "elesa_bw.yaml").write_text(original + "# 画面を開いている間に保存された\n", encoding="utf-8")
+    done = apply_plan(repo, insp, choices, confirmed=confirmed)
+    assert done.items[0].action == REJECT and ("変わった" in done.items[0].reason or "変更" in done.items[0].reason)
+    assert (data_dir / "characters" / "elesa_bw.yaml").read_text(encoding="utf-8").endswith("保存された\n")
+
+
+def test_the_peek_shows_a_line_diff_and_both_full_texts_for_a_conflict(repo, data_dir, tmp_path):
+    from moa.editor.logic.importing import report as R
+    original, changed = _changed_elesa(data_dir)
+    src = make_zip(tmp_path, {"characters/elesa_bw.yaml": changed + "# <script>x</script>\n"})
+    insp, plan = inspect(repo, src)
+    p = "characters/elesa_bw.yaml"
+    assert R.conflict_paths(plan) == [p]
+    html = R.peek_html(plan, insp, p, R.PEEK_DIFF)
+    assert "<ins" in html and "<del" in html and "別物" in html and "カミツレ（BW版）" in html
+    assert "<script>" not in html and "&lt;script&gt;" in html                         # エスケープされる
+    assert "別物" in R.peek_html(plan, insp, p, R.PEEK_NEW) and "カミツレ（BW版）" in R.peek_html(plan, insp, p, R.PEEK_OLD)
+    assert R.peek_html(plan, insp, "nothing.yaml", R.PEEK_DIFF) == ""                  # 競合でないものは出さない
+    assert R.line_diff_rows(original, original) == []
+
+
+def test_the_peek_folds_long_unchanged_runs():
+    from moa.editor.logic.importing import report as R
+    old = "\n".join(f"l{i}" for i in range(30))
+    rows = R.line_diff_rows(old, old.replace("l15", "L15"))
+    assert any(r.kind == "head" and "変更なし" in r.text for r in rows) and len(rows) < 20

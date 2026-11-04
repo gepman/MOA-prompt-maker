@@ -1,7 +1,7 @@
 """書き込み（EDITOR_SPEC 15.2・15.7章）。
 
 書き込む直前に、索引を読み直して計画を作り直す（確認画面を開いている間に、同じ id が保存された場合などに備える）。
-確認画面の内容と食い違うものは書き込まず、結果に出す。既存のファイルは決して上書きしない。
+確認画面の内容と食い違うものは書き込まず、結果に出す。既存のファイルは、確認画面で「上書きする」を選んだものだけ置き換える（それ以外は決して上書きしない）。
 """
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from ruamel.yaml.comments import CommentedMap
 
 from moa.core.entity_io import save_folder_meta
 from moa.core.repository import Repository
-from moa.core.yaml_io import atomic_create_text, make_yaml
+from moa.core.yaml_io import atomic_create_text, atomic_replace_text, make_yaml
 
 from .inspection import Inspection
-from .plan import F_CREATE, F_MERGE, F_REJECT, REJECT, Choices, Item, Plan, resolve
+from .plan import F_CREATE, F_MERGE, F_REJECT, OVERWRITE, REJECT, Choices, Item, Plan, _sig, resolve
 
 _LINE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
 
@@ -65,9 +65,9 @@ def apply_plan(repo: Repository, insp: Inspection, choices: Choices, confirmed: 
     stale_folders: set[tuple[str, str]] = set()
     if confirmed is not None:
         same_choices = resolve(repo, insp, confirmed.choices)   # 確認画面と同じ選択で、今の状態の計画
-        before = {i.path: (i.action, i.final_id, i.dest) for i in confirmed.items}
+        before = {i.path: (i.action, i.final_id, i.dest, i.existing_sig) for i in confirmed.items}
         for it in same_choices.items:
-            if before.get(it.path) != (it.action, it.final_id, it.dest):
+            if before.get(it.path) != (it.action, it.final_id, it.dest, it.existing_sig):
                 stale_items[it.path] = "確認画面を開いたあとに状況が変わったため、取り込みませんでした"
         before_f = {(f.path, f.key): f.action for f in confirmed.folders}
         for f in same_choices.folders:
@@ -83,6 +83,12 @@ def apply_plan(repo: Repository, insp: Inspection, choices: Choices, confirmed: 
             continue
         try:
             text = cands[it.path].text
+            if it.action == OVERWRITE:
+                if _sig(it.dest) != it.existing_sig:   # 計画を作ってから書くまでの間に、既存が変わっていないか
+                    _reject(it, "既存のファイルが変更されたため、上書きしませんでした")
+                    continue
+                atomic_replace_text(it.dest, text)
+                continue
             if it.final_id != it.id:
                 text = rewrite_id(text, it.id, it.final_id)
             atomic_create_text(it.dest, text)

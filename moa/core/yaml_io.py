@@ -61,6 +61,23 @@ def atomic_create_text(path: Path, text: str) -> None:
             tmp.unlink()
 
 
+def atomic_replace_text(path: Path, text: str) -> None:
+    """既にある `path` を、テキストそのまま（整形・改行の変換なし）で置き換える。一時ファイルに書いてから置き換える。
+
+    `path` が無ければ FileNotFoundError（新規作成は `atomic_create_text`）。インポートの「上書き」（EDITOR_SPEC 15.6章）が使う。
+    """
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def atomic_dump(doc, path: Path) -> None:
     """`<name>.yaml.tmp` に書いてから置き換える。"""
     tmp = path.with_name(path.name + ".tmp")

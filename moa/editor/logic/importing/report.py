@@ -4,13 +4,19 @@
 """
 from __future__ import annotations
 
-from moa.core.repository import Repository
+import difflib
+from html import escape
 
-from .plan import (CREATE, F_CREATE, F_MERGE, F_REJECT, F_SKIP_LABEL, F_SKIP_SAME, REJECT, RENAMED, SKIP_CHOICE,
-                   SKIP_SAME, SKIP_UNSELECTED, Choices, Plan)
+from moa.core.diffcore import Row
+from moa.core.repository import Repository
+from moa.ui.diffhtml import rows_to_html
+
+from .plan import (CREATE, F_CREATE, F_MERGE, F_REJECT, F_SKIP_LABEL, F_SKIP_SAME, OVERWRITE, REJECT, RENAMED,
+                   SKIP_CHOICE, SKIP_SAME, SKIP_UNSELECTED, Choices, Plan)
 
 RESULT_HEADERS = ["ファイル", "結果", "詳細"]
-CONFLICT_HEADERS = ["ファイル", "種類", "id", "既存のファイル", "別IDで取り込む", "新しいID"]
+CONFLICT_HEADERS = ["ファイル", "種類", "id", "既存のファイル", "扱い", "別IDで取り込む", "新しいID"]
+HANDLING_SKIP, HANDLING_OVERWRITE = "スキップ", "上書き"   # 「扱い」列（読み取り専用。上書きは中身を確認して OK を押したものだけ）
 KINDS_HEADERS = ["ファイル", "適合する種類", "取り込む種類（選ぶ）"]
 DESC_HEADERS = ["フォルダ", "既存の description", "取り込み側の description", "取り込み側を使う"]
 LABEL_HEADERS = ["フォルダ", "取り込み側の name", "表示名を付ける"]
@@ -33,6 +39,8 @@ def result_rows(repo: Repository, plan: Plan, done: bool) -> list[list[str]]:
             result, detail = f"{now}（新規）", f"→ {repo.rel(it.dest)}"
         elif it.action == RENAMED:
             result, detail = f"{now}（別ID）", f"{it.id} → {it.final_id}：{repo.rel(it.dest)}"
+        elif it.action == OVERWRITE:
+            result, detail = f"{now}（上書き）", f"既存の {it.existing} を置き換え"
         elif it.action == SKIP_SAME:
             result, detail = "スキップ（同じ内容）", it.reason
         elif it.action == SKIP_CHOICE:
@@ -68,7 +76,7 @@ def summary_md(plan: Plan, done: bool) -> str:
     count = lambda *acts: sum(1 for i in plan.items if i.action in acts)  # noqa: E731
     fcount = lambda *acts: sum(1 for f in plan.folders if f.action in acts)  # noqa: E731
     warns = sum(len(i.warnings) for i in plan.items if i.writes)
-    lines = [f"**{now}：{count(CREATE, RENAMED)} 件**（別ID {count(RENAMED)} 件）＋フォルダ設定 {fcount(F_CREATE, F_MERGE)} 件"
+    lines = [f"**{now}：{count(CREATE, RENAMED, OVERWRITE)} 件**（別ID {count(RENAMED)} 件・上書き {count(OVERWRITE)} 件）＋フォルダ設定 {fcount(F_CREATE, F_MERGE)} 件"
              f" ／ スキップ {count(SKIP_SAME, SKIP_CHOICE, SKIP_UNSELECTED) + fcount(F_SKIP_SAME, F_SKIP_LABEL)} 件"
              f"（同じ内容 {count(SKIP_SAME) + fcount(F_SKIP_SAME)}・選択 {count(SKIP_CHOICE) + fcount(F_SKIP_LABEL)}"
              f"・種類が未選択 {count(SKIP_UNSELECTED)}）"
@@ -79,7 +87,8 @@ def summary_md(plan: Plan, done: bool) -> str:
 
 # ---- 確認画面の表 ----
 def conflict_rows(plan: Plan, choices: Choices) -> list[list]:
-    return [[i.path, i.kind, i.id, i.existing, bool((choices.rename.get(i.path) or "").strip()),
+    return [[i.path, i.kind, i.id, i.existing, HANDLING_OVERWRITE if i.path in choices.overwrite else HANDLING_SKIP,
+             i.path in choices.rename,
              (choices.rename.get(i.path) or "").strip() or i.suggested] for i in plan.items if i.conflict]
 
 
@@ -97,6 +106,60 @@ def label_rows(plan: Plan, choices: Choices) -> list[list]:
     return [[f.key, f.import_name or "（name なし）", bool(choices.label.get(f.key))] for f in plan.folders if f.label_choice]
 
 
+# ---- 競合ファイルの中身の確認（上書きする前に見るためのもの）----
+PEEK_DIFF, PEEK_NEW, PEEK_OLD = "差分（既存 → 取り込み側）", "取り込み側の全文", "既存の全文"
+PEEK_MODES = [PEEK_DIFF, PEEK_NEW, PEEK_OLD]
+_CONTEXT, _FOLD = 3, 8   # 差分の前後に残す変更なしの行数 ／ これより長い変更なしの連続は畳む
+
+
+def conflict_paths(plan: Plan) -> list[str]:
+    return [i.path for i in plan.items if i.conflict]
+
+
+def line_diff_rows(old: str, new: str) -> list[Row]:
+    """テキストの行単位の差分。変更なしの長い連続は「… N 行 変更なし …」に畳む。同じなら空。"""
+    a, b = old.splitlines(), new.splitlines()
+    rows: list[Row] = []
+    plain = lambda t: Row("inline", segs=[("eq", t)])   # noqa: E731
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op == "equal":
+            lines = a[i1:i2]
+            if len(lines) > _FOLD:
+                rows += [plain(t) for t in lines[:_CONTEXT]]
+                rows.append(Row("head", text=f"… {len(lines) - 2 * _CONTEXT} 行 変更なし …"))
+                rows += [plain(t) for t in lines[-_CONTEXT:]]
+            else:
+                rows += [plain(t) for t in lines]
+        else:
+            rows += [Row("del", text=t) for t in a[i1:i2]] + [Row("ins", text=t) for t in b[j1:j2]]
+    return rows if any(r.kind in ("del", "ins") for r in rows) else []
+
+
+def _read(path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, AttributeError):
+        return ""
+
+
+def peek_html(plan: Plan, insp, path: str | None, mode: str) -> str:
+    """競合ファイルの確認表示（15.6章）。差分・取り込み側の全文・既存の全文。画面に出す文字列はすべてエスケープする。"""
+    it = plan.item(path) if path else None
+    cand = next((c for c in insp.candidates if c.path == path), None) if insp is not None else None
+    if it is None or not it.conflict or cand is None:
+        return ""
+    old, new = _read(it.existing_path), cand.text
+    head = f"<div><b>{escape(path)}</b> ／ 既存：{escape(it.existing)}</div>"
+    box = '<div style="white-space:pre-wrap;font-family:monospace;overflow-x:auto">{}</div>'
+    if mode == PEEK_NEW:
+        return head + box.format(escape(new))
+    if mode == PEEK_OLD:
+        return head + box.format(escape(old))
+    rows = line_diff_rows(old, new)
+    body = rows_to_html(rows) if rows else "<div>差分はありません（コメント・空白・改行コードだけの違いかもしれません）</div>"
+    return head + box.format(body)
+
+
 def _rows(table) -> list[list]:
     """Dataframe（type="array"）の値から、中身のある行だけを取り出す。"""
     if table is None:
@@ -108,12 +171,12 @@ def _rows(table) -> list[list]:
     return [list(r) for r in table if r and str(r[0]).strip()]
 
 
-def choices_from_tables(dest: dict[str, str], conflicts, kinds, descs, labels) -> Choices:
-    """確認画面の表と配置先の選択から、`Choices` を作る。"""
-    ch = Choices(dest={k: v for k, v in dest.items() if v})
+def choices_from_tables(dest: dict[str, str], conflicts, kinds, descs, labels, overwrite=()) -> Choices:
+    """確認画面の表と配置先の選択から、`Choices` を作る。overwrite は、中身を確認して OK を押したファイル（表では編集できない）。"""
+    ch = Choices(dest={k: v for k, v in dest.items() if v}, overwrite=set(overwrite))
     for r in _rows(conflicts):
-        if _truthy(r[4]):
-            ch.rename[str(r[0])] = str(r[5] or "").strip()
+        if _truthy(r[5]):
+            ch.rename[str(r[0])] = str(r[6] or "").strip()
     for r in _rows(kinds):
         value = str(r[2] or "").strip()
         if value:
