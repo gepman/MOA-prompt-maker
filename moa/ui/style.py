@@ -59,6 +59,8 @@ def prompt_css(px: int | float = DEFAULT_PROMPT_FONT_PX) -> str:
 .moa-diff .moa-head {{ font-weight: 700; margin-top: 0.4em; }}
 .moa-diff .moa-indent {{ padding-left: 1.2em; }}
 .moa-diff .moa-mark {{ display: inline-block; width: 1.2em; font-weight: 700; }}
+button.moa-seed-fixed {{ background: #f97316 !important; border-color: #ea580c !important; color: #fff !important; font-weight: 700; }}
+button.moa-seed-fixed:hover {{ background: #ea580c !important; }}
 .moa-diff .moa-jump {{ cursor: pointer; }}
 .moa-diff .moa-jump:hover {{ outline: 2px solid #3b82f6; }}
 .moa-diff .moa-go {{ font-size: 0.75em; margin-left: 0.6em; padding: 0 0.5em; border: 1px solid #999; border-radius: 4px; cursor: pointer; background: transparent; }}

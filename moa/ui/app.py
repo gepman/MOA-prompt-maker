@@ -176,7 +176,7 @@ def build_ui(repo: Repository,
                             "保存済みのシードがある Scene を開くと、そのシードで固定されます。")
                 with gr.Row():
                     seed_nb = gr.Number(label="シード", precision=0, minimum=0, maximum=SEED_MAX, scale=3)
-                    seed_btn = gr.Button(L.seed_labels(L.new_sd())[0], scale=2)
+                    seed_btn = gr.Button(L.seed_labels(L.new_sd())[0], scale=2, elem_classes=L.seed_btn_classes(L.new_sd()))
                 seed_md = gr.Markdown(L.seed_labels(L.new_sd())[1])
                 gen_btn = gr.Button("🎨 生成", variant="primary")
                 retry_btn = gr.Button("🔁 Anima段だけ再試行", visible=False)
@@ -437,7 +437,8 @@ def build_ui(repo: Repository,
         # ---- シード固定（13.2章）----
         def sd_view(sd_v, keep_value=False):
             label, text = L.seed_labels(sd_v)
-            return [sd_v, gr.skip() if keep_value else sd_v["value"], label, text]
+            btn = gr.update(value=label, elem_classes=L.seed_btn_classes(sd_v))   # 「シードを固定」の文言のときだけオレンジ
+            return [sd_v, gr.skip() if keep_value else sd_v["value"], btn, text]
 
         def refresh_sd(sc_v, sd_v):
             """Scene を開いたら、保存されていたシードがあれば固定ON、なければランダムに戻す。"""

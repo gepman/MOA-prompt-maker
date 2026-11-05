@@ -508,6 +508,11 @@ def seed_labels(sd: dict) -> tuple[str, str]:
     return "🔒 シードを固定", "🎲 **ランダム**：生成ごとに新しいシードを使います（欄は直前のシード）"
 
 
+def seed_btn_classes(sd: dict) -> list[str]:
+    """［シード固定］ボタンの CSS クラス。ランダム中（［シードを固定］が押せる状態）だけ moa-seed-fixed（オレンジ）を付ける。"""
+    return [] if sd["fixed"] else ["moa-seed-fixed"]
+
+
 def set_override(gp: dict, stage: str, param: str, value) -> dict:
     gp = copy.deepcopy(gp)
     gp["gen"].setdefault(stage, {})[param] = normalize_value(param, value)
