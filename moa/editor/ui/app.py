@@ -11,14 +11,16 @@ import copy
 from functools import partial
 
 import gradio as gr
+from gradio_image_annotation import image_annotator
 
 from moa.core.models import Issue
 from moa.core.repository import Repository
+from moa.editor.logic import bboxedit as BE
 from moa.editor.logic import cards as C
 from moa.editor.logic import diffs as D
 from moa.editor.logic import forms, session, tree
 from moa.editor.logic import picker as PK
-from moa.editor.logic.bboxdraw import draw_bboxes
+from moa.editor.logic.bboxdraw import draw_base, draw_bboxes
 from moa.editor.logic.forms import DEFAULT_CANVAS, KIND_LABEL, MAX_ITEMS
 from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
@@ -40,7 +42,8 @@ def issue_lines(issues: list[Issue]) -> str:
                      for i in issues)
 
 
-def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_FONT_PX) -> gr.Blocks:
+def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_FONT_PX,
+                 bbox_margin: float = BE.DEFAULT_MARGIN) -> gr.Blocks:
     c: dict = {}   # 名前 → 部品
 
     def R(name, comp):
@@ -157,7 +160,15 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                             R(f"c_card{i}", card)
                         R("add_btn", gr.Button("＋アイテム追加"))
                         R("add_hint", gr.Markdown())
-                        R("bbox_img", gr.Image(label="bbox プレビュー図（表示専用）", type="pil", interactive=False))
+                        gr.Markdown("**bbox 編集図**（四角をつかんで移動・四隅や辺で大きさ変更・何もない所を描いて追加。"
+                                    "灰色はキャンバスの外。削除はカードの［削除］で）")
+                        # 描画はアイコン操作。ラベルは自動（#n）なので編集ダイアログは出さない。Delete などのキー操作は無効
+                        R("bbox_fig", image_annotator(
+                            None, label="bbox 編集図", image_type="pil", sources=[], use_default_label=True,
+                            disable_edit_boxes=True, enable_keyboard_shortcuts=False, show_clear_button=False,
+                            show_remove_button=False, show_download_button=False, show_share_button=False,
+                            box_min_size=4))
+                        R("bbox_fig_msg", gr.Markdown())
 
                     with gr.Group(visible=False) as anima_blk:
                         R("anima", gr.Textbox(label="anima", lines=4, elem_classes=["moa-prompt"], elem_id=TEXTBOX_ID.format("anima")))
@@ -371,17 +382,29 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                     blocks["pv_bg"]: gr.update(visible=on("character", "outfit", "action")),
                     c["copy_btn"]: gr.update(visible=mode == "edit")}
 
-        def own_image(kind: str, v: dict):
-            """編集中の bbox 図（自分のアイテムだけ）。キャンバスは 8章の規則。"""
+        def edit_canvas(kind: str, v: dict, pv_bg: str | None = None) -> tuple[dict, list[dict]]:
+            """bbox 編集図のキャンバスと、参考線にする Background のアイテム（8.1）。
+            Background 編集中は自分の canvas。Action 編集中は、プレビューで選んだ Background ＞ 推奨背景 ＞ 1536×1024。"""
             if kind == "background":
-                canvas, source = v["canvas"], "background"
-            else:
-                bg = repo.background(v["background"]) if v.get("background") else None
-                canvas, source = (bg.canvas if bg else DEFAULT_CANVAS), "action"
+                cv = v.get("canvas") or {}
+                w, h = int(cv.get("w") or 0), int(cv.get("h") or 0)
+                return ({"w": w, "h": h} if w > 0 and h > 0 else DEFAULT_CANVAS), []
+            bg_id = pv_bg or v.get("background")
+            bg = repo.background(bg_id) if bg_id else None
+            if bg:
+                return bg.canvas, [{"bbox": list(it.bbox)} for it in bg.moss_items]
+            return DEFAULT_CANVAS, []
+
+        def fig_update(kind: str, v: dict, pv_bg: str | None = None) -> dict:
+            """bbox 編集図の表示用データ（土台の画像＋各カードの四角）と、編集対象外の案内。"""
             try:
-                return draw_bboxes(canvas, [(source, forms.normalize(kind, v)["mossItems"])])
+                canvas, ref = edit_canvas(kind, v, pv_bg)
+                frame = BE.make_frame(canvas, bbox_margin)
+                boxes, notes = BE.figure_boxes(forms.normalize(kind, v)["mossItems"], frame)
             except Exception:
-                return None
+                return {c["bbox_fig_msg"]: ""}
+            return {c["bbox_fig"]: {"image": draw_base(frame, ref), "boxes": boxes},
+                    c["bbox_fig_msg"]: "\n".join(f"- ⚠ {n}" for n in notes)}
 
         def status_text(st_v: dict, v: dict | None) -> str:
             if st_v["mode"] is None:
@@ -473,8 +496,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 else:
                     out |= {c["rating"]: v["rating"], c["metaTags"]: forms.join_list(v["metaTags"]),
                             c["mossCaption"]: v["mossCaption"]}
-                    out |= cards_updates(v["mossItems"])
-                    out[c["bbox_img"]] = own_image(kind, v)
+                    out |= cards_updates(v["mossItems"]) | fig_update(kind, v)
                     if kind == "background":
                         out |= {c["cw"]: v["canvas"]["w"], c["ch"]: v["canvas"]["h"]}
                     else:
@@ -582,6 +604,7 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             value = entity_id or ("" if t == "act_bg" else None)
             out |= set_ref(name, kind, value, "outfit", PK.EMPTY_TEXT.get(t, "（未選択）"))
             a = dict(zip(FORM_NAMES, args))
+            pv_bg = args[len(FORM_NAMES)] if len(args) > len(FORM_NAMES) else None   # 末尾はプレビューの Background
             if name in a:   # フォームの値（プレビューの選択欄は保存対象ではない）
                 a[name] = value
                 if t in TARGET_MODE:
@@ -589,8 +612,12 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 v = gather(st_v, n, list(a.values()))
                 out[c["status"]] = status_text(st_v, v)
                 if t == "act_bg" and v is not None:
-                    out[c["bbox_img"]] = own_image(st_v["kind"], v)
+                    out |= fig_update(st_v["kind"], v, pv_bg)
                 out |= diff_values(st_v, v)
+            elif t == "pv_bg" and st_v["kind"] == "action":   # プレビューの Background を選ぶと、図のキャンバスと参考線が変わる
+                v = gather(st_v, n, args[:len(FORM_NAMES)])
+                if v is not None:
+                    out |= fig_update("action", v, entity_id)
             return out
 
         def on_pk_pick(entity_id, pk_v, st_v, n, *args):
@@ -621,28 +648,61 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             return out | slot_help(slots) | on_dirty(st_v, n, *args)
 
         # カード操作
+        def items_changed(st_v, v: dict, items: list[dict]) -> dict:
+            """カードの中身が変わったときの更新（カード・保存状態・警告・色付き差分）。v["mossItems"] も差し替える。"""
+            out = cards_updates(items)
+            v["mossItems"] = items
+            out[c["status"]] = status_text(st_v, v)
+            out[c["issues"]] = issue_lines(validate_draft(repo, st_v["kind"], v, new=st_v["mode"] != "edit",
+                                                          original_id=st_v["id"]))
+            return out | diff_values(st_v, v)
+
+        def split_pv(args) -> tuple[list, str | None]:
+            """フォーム値の並びの後ろに付けたプレビューの Background（pv_bg）を分ける。"""
+            return list(args[:len(FORM_NAMES)]), (args[len(FORM_NAMES)] if len(args) > len(FORM_NAMES) else None)
+
         def card_op(op: str, i: int, st_v, n, *args):
-            a = dict(zip(FORM_NAMES, args))
+            form, pv_bg = split_pv(args)
+            a = dict(zip(FORM_NAMES, form))
             kind = st_v["kind"]
             items = card_items(a, n)
-            if kind == "background":
-                canvas = {"w": int(a["cw"] or DEFAULT_CANVAS["w"]), "h": int(a["ch"] or DEFAULT_CANVAS["h"])}
-            else:
-                bg = repo.background(a["act_bg"]) if a["act_bg"] else None
-                canvas = bg.canvas if bg else DEFAULT_CANVAS
+            canvas = edit_canvas(kind, gather(st_v, n, form) or {}, pv_bg)[0]
             items = {"add": lambda: C.add_item(items, canvas), "del": lambda: C.delete_item(items, i),
                      "up": lambda: C.move_up(items, i), "down": lambda: C.move_down(items, i),
                      "full": lambda: C.set_full(items, i, canvas)}[op]()
-            out = cards_updates(items)
-            v = gather(st_v, len(items), args)
-            if v is not None:
-                v["mossItems"] = items
-                out[c["status"]] = status_text(st_v, v)
-                out[c["bbox_img"]] = own_image(kind, v)
-                out[c["issues"]] = issue_lines(validate_draft(repo, kind, v, new=st_v["mode"] != "edit",
-                                                              original_id=st_v["id"]))
-                out |= diff_values(st_v, v)
-            return out
+            v = gather(st_v, len(items), form)
+            if v is None:
+                return cards_updates(items)
+            return items_changed(st_v, v, items) | fig_update(kind, v, pv_bg)
+
+        # bbox 編集図（8.1）。図で動かす・描く操作のあと（マウスを離したとき）だけ呼ばれる
+        def on_figure(fig, st_v, n, *args):
+            kind = st_v["kind"]
+            form, pv_bg = split_pv(args)
+            if st_v["mode"] not in ("edit", "new", "copy") or kind not in ("background", "action"):
+                return gr.skip()
+            v = gather(st_v, n, form)
+            if v is None:
+                return gr.skip()
+            frame = BE.make_frame(edit_canvas(kind, v, pv_bg)[0], bbox_margin)
+            boxes = (fig or {}).get("boxes") or []
+            items = v["mossItems"]
+            new_items, changed, notes = BE.apply_figure(items, boxes, frame)
+            out = items_changed(st_v, v, new_items) if changed else {}
+            if not BE.figure_matches(new_items, boxes, frame):   # 描いた四角（ラベルが無い）・追加できなかった四角・消えた四角は描き直す
+                out |= fig_update(kind, v, pv_bg)
+                if notes:
+                    out[c["bbox_fig_msg"]] = (out[c["bbox_fig_msg"]] + "\n" if out.get(c["bbox_fig_msg"]) else "") + \
+                        "\n".join(f"- ⚠ {x}" for x in notes)
+            return out or gr.skip()   # 変化がなければ何もしない（Python から値を入れた直後の change でループしない）
+
+        def on_fig_refresh(st_v, n, *args):
+            """bbox・canvas の欄のフォーカスが外れたとき：図を作り直す（キー入力ごとには描かない）。"""
+            form, pv_bg = split_pv(args)
+            if st_v["mode"] not in ("edit", "new", "copy") or st_v["kind"] not in ("background", "action"):
+                return gr.skip()
+            v = gather(st_v, n, form)
+            return fig_update(st_v["kind"], v, pv_bg) if v is not None else gr.skip()
 
         # 検証・保存
         def on_check(st_v, n, *args):
@@ -726,6 +786,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
             if ch:
                 out |= set_ref("pv_act", "action", ch["action"], empty="（自動）")
                 out |= set_ref("pv_bg", "background", ch["background"], empty="（自動）")
+                if st_v["kind"] == "action":   # 選ばれた Background のキャンバスと mossItems を、編集図の土台に反映する
+                    out |= fig_update("action", v, ch["background"])
                 act = None if st_v["kind"] == "action" else repo.action(ch["action"])
                 slots = forms.normalize("action", v)["slots"] if st_v["kind"] == "action" else (
                     list(act.slots) if act else [])
@@ -755,8 +817,9 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
         c["pk_q"].submit(on_pk_search, [c["pk_q"], c["pk"]], OUT, api_name="pk_search")
         c["pk_search"].click(on_pk_search, [c["pk_q"], c["pk"]], OUT, api_name="pk_search_btn")
         c["pk_clear_q"].click(on_pk_clear_query, [c["pk"]], OUT, api_name="pk_clear_query")
-        c["pk_items"].input(on_pk_pick, [c["pk_items"], c["pk"]] + ST_FORM, OUT, api_name="pk_pick")
-        c["pk_none"].click(on_pk_none, [c["pk"]] + ST_FORM, OUT, api_name="pk_none")
+        FIG_IN = ST_FORM + [c["pv_bg"]]   # フォーム値の後ろに、プレビューの Background（図のキャンバスを決める）
+        c["pk_items"].input(on_pk_pick, [c["pk_items"], c["pk"]] + FIG_IN, OUT, api_name="pk_pick")
+        c["pk_none"].click(on_pk_none, [c["pk"]] + FIG_IN, OUT, api_name="pk_none")
         c["pk_cancel"].click(on_pk_cancel, [c["pk"]], OUT, api_name="pk_cancel")
         mode_show_pairs = [("def_pick", "def_mode")] + [(f"o_pick{i}", f"o_mode{i}") for i in range(MAX_SLOTS)]
         for name, mode in mode_show_pairs:
@@ -772,10 +835,17 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                 continue
             (comp.input if isinstance(comp, gr.Radio) else comp.blur)(on_diff, ST_FORM, OUT, api_name=f"diff_{n_}")
 
-        c["add_btn"].click(partial(card_op, "add", 0), ST_FORM, OUT, api_name="card_add")
+        c["add_btn"].click(partial(card_op, "add", 0), FIG_IN, OUT, api_name="card_add")
         for i in range(MAX_ITEMS):
             for op in ("up", "down", "del", "full"):
-                c[f"c_{op}{i}"].click(partial(card_op, op, i), ST_FORM, OUT, api_name=f"card_{op}_{i}")
+                c[f"c_{op}{i}"].click(partial(card_op, op, i), FIG_IN, OUT, api_name=f"card_{op}_{i}")
+        # bbox 編集図（8.1）：図 → カードは、マウスを離したときの change だけ。カード → 図は、数値欄・canvas 欄のフォーカスが外れたとき
+        c["bbox_fig"].change(on_figure, [c["bbox_fig"]] + FIG_IN, OUT, api_name="figure", show_progress="hidden")
+        for i in range(MAX_ITEMS):
+            for k in ("y0", "x0", "y1", "x1"):
+                c[f"c_{k}{i}"].blur(on_fig_refresh, FIG_IN, OUT, api_name=f"fig_refresh_{k}{i}")
+        for n_ in ("cw", "ch"):
+            c[n_].blur(on_fig_refresh, FIG_IN, OUT, api_name=f"fig_refresh_{n_}")
 
         check_btn.click(on_check, ST_FORM, OUT, api_name="check")
         save_btn.click(partial(do_save, False, False), STATE_IN + [c["cow_id"]] + FORM, OUT, api_name="save")

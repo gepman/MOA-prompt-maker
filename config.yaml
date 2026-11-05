@@ -5,6 +5,7 @@ builder:
 editor:
   port: 7863                          # editor.py（エディタ）
   # promptFontSize: 16                # 長い文章・タグの欄と差分欄の文字サイズ（px）。省略すると builder.promptFontSize を使う
+  # bboxMargin: 0.5                   # bbox 編集図の余白（キャンバスの幅・高さに対する割合。上下左右に付く。0〜2、既定 0.5）
 
 # ComfyUI 連携の設定。
 # ノードIDの候補は次のコマンドでワークフローから推定できる:

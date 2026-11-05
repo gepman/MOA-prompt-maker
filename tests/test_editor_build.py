@@ -199,7 +199,7 @@ def test_picker_for_action_background_slot_outfits_and_preview(repo):
 
     d.call("pick_act_bg")
     d.call("pk_pick", "white_background")
-    assert d["act_bg"] == "white_background" and d.update_of("bbox_img") is not None
+    assert d["act_bg"] == "white_background" and d.update_of("bbox_fig") is not None
     d.call("pick_act_bg")
     assert d["pk"]["cwd"] == "backgrounds" and d.update_of("pk_none")["visible"] is True   # 空にできる欄
     d.call("pk_none")

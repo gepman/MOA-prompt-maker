@@ -1,4 +1,5 @@
 gradio>=5,<6
+gradio_image_annotation==0.4.1   # bbox 編集図。0.5 以降は Gradio 6 が必須なので、0.4.1 に固定する
 ruamel.yaml
 jsonschema
 httpx

@@ -15,6 +15,17 @@ def config_port(config_path: Path | str, section: str, default: int) -> int:
     return port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else default
 
 
+def config_bbox_margin(config_path: Path | str, default: float = 0.5) -> float:
+    """editor.bboxMargin：bbox 編集図の余白（キャンバスの幅・高さに対する割合）。0〜2 の数値だけ有効で、それ以外・読めないときは既定。"""
+    try:
+        data = YAML(typ="safe").load(Path(config_path).read_text(encoding="utf-8")) or {}
+        value = (data.get("editor") or {}).get("bboxMargin")
+    except Exception:
+        return default
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 2
+    return value if ok else default
+
+
 def _valid_font_size(size) -> bool:
     return isinstance(size, (int, float)) and not isinstance(size, bool) and 8 <= size <= 48
 

@@ -8,6 +8,29 @@ COLORS = {"background": "#2f7fd8", "action": "#e08a1e"}
 WARN = "#d62828"
 
 
+OUTSIDE = "#b5b5b5"   # 画像の外（余白）
+REF = "#9dbde6"       # Action 編集中の、背景の mossItems（操作できない参考の線）
+
+
+def draw_base(frame, ref_items=()) -> Image.Image:
+    """bbox 編集図（EDITOR_SPEC 8.1）の土台。余白はグレー、キャンバスは白で濃い枠、中心線、背景の参考線（薄い色・番号なし）。"""
+    from .bboxedit import to_image
+
+    img = Image.new("RGB", (frame.width, frame.height), OUTSIDE)
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = frame.canvas_rect
+    d.rectangle([x0, y0, x1, y1], fill="white")
+    d.line([frame.ox, y0, frame.ox, y1], fill="#cccccc", width=2)
+    d.line([x0, frame.oy, x1, frame.oy], fill="#cccccc", width=2)
+    thick = max(2, round(frame.width / 300))
+    for it in ref_items:
+        by0, bx0, by1, bx1 = it["bbox"]
+        ax, ay, bx, by = to_image([min(by0, by1), min(bx0, bx1), max(by0, by1), max(bx0, bx1)], frame)
+        d.rectangle([ax, ay, bx, by], outline=REF, width=thick)
+    d.rectangle([x0, y0, x1, y1], outline="#222222", width=thick)
+    return img
+
+
 def _out_of_canvas(bbox, w, h) -> bool:
     y0, x0, y1, x1 = bbox
     return x0 < -w / 2 or x1 > w / 2 or y0 < -h / 2 or y1 > h / 2
