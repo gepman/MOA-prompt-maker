@@ -11,6 +11,15 @@ def test_editor_builds(repo):
     build_editor(repo)
 
 
+def test_editor_events_are_hidden_from_api_info(repo):
+    """カードが 64 枚あるので、イベントを API 情報に出すと、ページに埋め込まれる量が巨大になる（約 170MB・初回表示 30 秒、
+    Gradio の起動チェックが 3 秒で打ち切られて「localhost is not accessible」で起動できなくなった）。画面専用のイベントは外す。"""
+    demo = build_editor(repo)
+    assert all(fn.show_api is False for fn in demo.fns.values())
+    assert demo.get_api_info()["named_endpoints"] == {}
+    assert any(fn.api_name for fn in demo.fns.values())      # api_name は残る（テストが使う）
+
+
 class Driver:
     """Gradio のイベントを、ブラウザなしで api_name から呼ぶ（入力は部品の現在値を持ち回る）。
 
