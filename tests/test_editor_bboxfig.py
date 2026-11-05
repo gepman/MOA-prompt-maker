@@ -2,7 +2,7 @@
 from conftest import write
 from moa.core.repository import Repository
 from moa.editor.logic import bboxedit as BE
-from moa.editor.logic.forms import MAX_ITEMS
+from moa.editor.logic.forms import MAX_ITEMS, RECOMMENDED_ITEMS
 from moa.editor.ui.app import build_editor
 from test_editor_build import Driver
 
@@ -95,15 +95,29 @@ def test_draw_in_figure_adds_a_card(repo):
     assert "未保存" in d["status"]
 
 
-def test_draw_is_ignored_when_there_are_8_cards(repo):
+def test_draw_beyond_the_recommended_8_still_adds(repo):
+    """おすすめは8件までだが、実際の上限は64件。8件のときに図で描くと9件目が追加される（警告もエラーもない）。"""
+    d = open_action(repo)
+    while d["cards_n"] < RECOMMENDED_ITEMS:
+        d.call("card_add")
+    assert d["cards_n"] == 8
+    send(d, fig(d)["boxes"] + [box("", 1000, 600, 1400, 900)])
+    assert d["cards_n"] == 9 and cards(d)[8] == [-424, -536, -124, -136]
+    assert d.update_of("c_card8")["visible"] is True
+    assert len(fig(d)["boxes"]) == 9 and d["bbox_fig_msg"] == ""
+    d.call("check")
+    assert "❌" not in d["issues"]
+
+
+def test_draw_is_ignored_at_the_max_of_64(repo):
     d = open_action(repo)
     while d["cards_n"] < MAX_ITEMS:
         d.call("card_add")
-    assert d["cards_n"] == MAX_ITEMS
+    assert d["cards_n"] == MAX_ITEMS == 64
     before = cards(d)
     send(d, fig(d)["boxes"] + [box("", 1000, 600, 1400, 900)])
     assert d["cards_n"] == MAX_ITEMS and cards(d) == before         # 図では追加されない
-    assert "最大8件" in d["bbox_fig_msg"]
+    assert f"最大{MAX_ITEMS}件" in d["bbox_fig_msg"]
     assert len(fig(d)["boxes"]) == MAX_ITEMS                          # 余分な四角は消す
 
 

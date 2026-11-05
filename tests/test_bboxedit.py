@@ -6,7 +6,7 @@ import pytest
 from moa.core.appconfig import config_bbox_margin
 from moa.editor.logic import bboxedit as BE
 from moa.editor.logic.bboxdraw import draw_base
-from moa.editor.logic.forms import MAX_ITEMS
+from moa.editor.logic.forms import MAX_ITEMS, RECOMMENDED_ITEMS
 
 CANVAS = {"w": 1536, "h": 1024}
 F = BE.make_frame(CANVAS, 0.5)   # 余白 768 / 512 → 土台 3072×2048、原点は (1536, 1024)
@@ -144,6 +144,13 @@ def test_drawn_box_with_a_clashing_label_is_still_new():
     new, changed, _ = BE.apply_figure(items, boxes, F)
     assert changed and len(new) == 2 and new[0] == items[0]
     assert new[1]["bbox"] == [-424, -536, -124, -136]
+
+
+def test_drawing_beyond_the_recommended_8_adds_up_to_the_max():
+    items = [item([i, i, i + 5, i + 5]) for i in range(RECOMMENDED_ITEMS)]
+    new, changed, notes = BE.apply_figure(items, fig_of(items) + [box("", 1000, 600, 1400, 900)], F)
+    assert changed and len(new) == RECOMMENDED_ITEMS + 1 and notes == []   # おすすめを超えても追加できる（実際の上限は 64）
+    assert MAX_ITEMS == 64
 
 
 def test_drawing_is_ignored_at_max_items():

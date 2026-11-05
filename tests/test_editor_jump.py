@@ -7,6 +7,7 @@ import pytest
 from moa.core.diffcore import to_text
 from moa.editor.logic import diffs as D
 from moa.editor.logic import forms
+from moa.editor.logic.forms import MAX_ITEMS
 from moa.editor.ui.app import build_editor
 from moa.ui.style import JUMP_JS, TEXTBOX_ID
 from test_editor_build import Driver
@@ -125,7 +126,7 @@ def test_screen_has_the_script_and_matching_ids(repo):
     demo = build_editor(repo)
     assert "<script>" in demo.head and "__moaJump" in demo.head
     ids = {b.elem_id for b in demo.blocks.values() if isinstance(b, gr.Textbox) and (b.elem_id or "").startswith("moa-tb-")}
-    wanted = {"name", "tags", "group", "metaTags", "slots", *D.LONG_KEYS, *(f"c_caption{i}" for i in range(8))}
+    wanted = {"name", "tags", "group", "metaTags", "slots", *D.LONG_KEYS, *(f"c_caption{i}" for i in range(MAX_ITEMS))}
     assert ids == {TEXTBOX_ID.format(n) for n in wanted}
     assert "input[type=text]" in JUMP_JS and "#moa-tb-' + el.getAttribute('data-moa-field')" in JUMP_JS
 

@@ -10,6 +10,7 @@ from moa.core.diffcore import opcodes, to_text
 from moa.core.textutil import split_tags
 from moa.editor.logic import diffs as D
 from moa.editor.logic import forms, session
+from moa.editor.logic.forms import MAX_ITEMS
 from moa.editor.ui.app import build_editor
 from moa.ui import diffhtml
 from test_editor_build import Driver
@@ -292,8 +293,8 @@ def test_editor_css_uses_the_font_size_and_only_the_long_text_boxes_get_the_clas
     assert "font-size: 22px" in demo.css and ".moa-prompt" in demo.css
     classed = {n for n, comp in demo.named.items() if "moa-prompt" in (getattr(comp, "elem_classes", None) or [])}
     long_boxes = {"moss", "anima", "mossCaption", "bodyHairMoss", "bodyHairAnima", "negativeMoss", "negativeAnima",
-                  *(f"c_caption{i}" for i in range(8))}
-    diff_boxes = {"chg_html", "conf_diff", *(f"df_{k}" for k in D.LONG_KEYS), *(f"c_df{i}" for i in range(8))}
+                  *(f"c_caption{i}" for i in range(MAX_ITEMS))}
+    diff_boxes = {"chg_html", "conf_diff", *(f"df_{k}" for k in D.LONG_KEYS), *(f"c_df{i}" for i in range(MAX_ITEMS))}
     assert classed == long_boxes | diff_boxes
     for name in ("id", "name", "tags", "group", "cw", "ch", "slots", "metaTags", "save_msg", "issues"):
         assert name not in classed

@@ -3,6 +3,7 @@ import gradio as gr
 
 from conftest import check_output_shape
 from moa.core.repository import load_yaml
+from moa.editor.logic.forms import MAX_ITEMS, RECOMMENDED_ITEMS
 from moa.editor.ui.app import build_editor
 
 
@@ -91,9 +92,12 @@ def test_editor_flow_cards_and_preview(repo):
     d.call("section", "actions")
     d.call("browse", "file:actions/beach_chat.yaml")
     n0 = d["cards_n"]
-    while d["cards_n"] < 8:
+    while d["cards_n"] < RECOMMENDED_ITEMS:        # おすすめの8件までは普通に増やせる（ボタンは有効のまま）
         d.call("card_add")
-    assert d.update_of("add_btn")["interactive"] is False and d["add_hint"] == "最大8件です"
+    assert d.update_of("add_btn")["interactive"] is True and d["add_hint"] == ""
+    while d["cards_n"] < MAX_ITEMS:                 # 実際の上限は64件
+        d.call("card_add")
+    assert d.update_of("add_btn")["interactive"] is False and d["add_hint"] == f"最大{MAX_ITEMS}件です"
     d.call("card_full_0")
     assert [d[f"c_{k}0"] for k in ("y0", "x0", "y1", "x1")] == [-512, -768, 512, 768]
     d.call("preview")

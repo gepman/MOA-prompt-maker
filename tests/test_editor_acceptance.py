@@ -7,6 +7,7 @@ import pytest
 from conftest import errors, warnings
 from moa.core.repository import load_yaml
 from moa.editor.logic import cards, forms, session
+from moa.editor.logic.forms import MAX_ITEMS, RECOMMENDED_ITEMS
 from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, ERRORS, EXTERNAL, SAVED, save_draft,
                                    save_folder)
@@ -322,10 +323,13 @@ def test_12d_preview_background_and_action_defaults(repo):
 def test_13_cards(repo, data_dir):
     canvas = {"w": 1536, "h": 1024}
     items = []
-    for _ in range(8):
+    for _ in range(RECOMMENDED_ITEMS):             # おすすめの8件までは普通に増やせる
         assert cards.can_add(items)
         items = cards.add_item(items, canvas)
-    assert not cards.can_add(items) and cards.add_hint(items) == "最大8件です"
+    assert cards.can_add(items) and cards.add_hint(items) == ""      # 8件を超えても追加できる（実際の上限は64件）
+    while len(items) < MAX_ITEMS:
+        items = cards.add_item(items, canvas)
+    assert len(items) == 64 and not cards.can_add(items) and cards.add_hint(items) == "最大64件です"
     assert cards.add_item(items, canvas) == items
 
     assert cards.set_full([{"label": "object", "caption": "", "bbox": [0, 0, 1, 1]}], 0, canvas)[0]["bbox"] == [-512, -768, 512, 768]

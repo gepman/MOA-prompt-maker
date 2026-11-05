@@ -21,7 +21,7 @@ from moa.editor.logic import diffs as D
 from moa.editor.logic import forms, session, tree
 from moa.editor.logic import picker as PK
 from moa.editor.logic.bboxdraw import draw_base, draw_bboxes
-from moa.editor.logic.forms import DEFAULT_CANVAS, KIND_LABEL, MAX_ITEMS
+from moa.editor.logic.forms import DEFAULT_CANVAS, KIND_LABEL, MAX_ITEMS, RECOMMENDED_ITEMS
 from moa.editor.logic.preview import preview
 from moa.editor.logic.save import (CONFIRM_COW, CONFIRM_USED_ACTION, COW_ID_ERROR, ERRORS, EXTERNAL, SAVED,
                                    save_draft, save_folder)
@@ -140,7 +140,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
                         R("df_mossCaption", gr.HTML(visible=False, elem_classes=["moa-prompt"]))
 
                     with gr.Group(visible=False) as cards_blk:
-                        gr.Markdown("**mossItems**（label・caption・bbox `[y_min, x_min, y_max, x_max]`）")
+                        gr.Markdown("**mossItems**（label・caption・bbox `[y_min, x_min, y_max, x_max]`）　"
+                                    f"おすすめは**最大{RECOMMENDED_ITEMS}件**まで（{MAX_ITEMS}件まで追加できます）")
                         for i in range(MAX_ITEMS):
                             with gr.Group(visible=False) as card:
                                 R(f"c_hdr{i}", gr.Markdown(f"**#{i + 1}**"))
