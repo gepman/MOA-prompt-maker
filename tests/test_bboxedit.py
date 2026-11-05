@@ -87,14 +87,38 @@ def test_untouched_figure_changes_nothing():
     assert BE.figure_matches(items, fig_of(items), F)
 
 
-def test_one_pixel_jitter_is_ignored():
-    """部品は読み込み時に座標を 1px ずらして返すことがある。触っていない四角として扱う。"""
+def test_tolerance_grows_with_the_base_size():
+    assert BE.tolerance(F) == 4                                            # 土台 3072×2048
+    assert BE.tolerance(BE.make_frame({"w": 64, "h": 48}, 0.5)) == 1       # 小さい土台は下限の 1
+    assert BE.tolerance(BE.make_frame({"w": 1536, "h": 1024}, 0)) == 2
+
+
+def test_jitter_within_the_tolerance_is_ignored():
+    """部品は読み込み時に、縮小表示の丸めで座標を数px ずらして返す（土台 3072px を 752px で表示すると最大 2px）。
+    触っていない四角として扱い、カードを変えない。"""
     items = [item([-10, -20, 30, 40])]
-    jittered = [box("#1", 1516, 1013, 1576, 1054)]
-    new, changed, _ = BE.apply_figure(items, jittered, F)
-    assert new == items and not changed
-    assert BE.figure_matches(items, jittered, F)
-    assert not BE.figure_matches(items, [box("#1", 1516, 1012, 1576, 1054)], F)   # 2px 以上は別物
+    for jittered in ([box("#1", 1516, 1013, 1576, 1054)],      # 1px
+                     [box("#1", 1514, 1014, 1578, 1052)],      # 2px（実機で見られたずれ）
+                     [box("#1", 1512, 1010, 1580, 1058)]):     # 許容幅ちょうど（4px）
+        new, changed, _ = BE.apply_figure(items, jittered, F)
+        assert new == items and not changed
+        assert BE.figure_matches(items, jittered, F)
+    assert not BE.figure_matches(items, [box("#1", 1516, 1008, 1576, 1054)], F)   # 許容幅を超えたら別物
+
+
+def test_a_real_drag_beyond_the_tolerance_is_applied_but_untouched_edges_keep_their_values():
+    items = [item([-380, -190, 320, 190])]
+    # 右の辺だけを +100 引いた。ほかの辺は読み込みで 2px ずれて返ってきている（-190→-192、-380→-379）
+    new, changed, _ = BE.apply_figure(items, [box("#1", 1536 - 192, 1024 - 379, 1536 + 290, 1024 + 320)], F)
+    assert changed and new[0]["bbox"] == [-380, -190, 320, 290]
+
+
+def test_the_real_world_case_two_px_drift_on_load_changes_nothing():
+    """実機：Action の mossItems が図を描いた直後に [-380,-190,320,190] → [-379,-192,320,192] に書き換わっていた。"""
+    items = [item([-380, -640, 320, -260]), item([-380, -190, 320, 190]), item([-380, 260, 320, 640])]
+    echoed = [box("#1", 896, 644, 1276, 1344), box("#2", 1344, 645, 1728, 1344), box("#3", 1796, 644, 2176, 1344)]
+    new, changed, _ = BE.apply_figure(items, echoed, F)
+    assert new == items and not changed and BE.figure_matches(items, echoed, F)
 
 
 def test_move_writes_new_bbox_into_card():

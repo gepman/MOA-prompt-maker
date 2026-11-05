@@ -14,7 +14,8 @@ from .cards import can_add
 from .forms import MAX_ITEMS
 
 DEFAULT_MARGIN = 0.5
-TOL = 1   # 部品が座標を ±1px ずらして返すことがあるので、この範囲の差は「触っていない」とみなす
+TOL = 1   # 許容幅の下限。実際の許容幅は土台の大きさで決まる（tolerance）
+TOL_DIVISOR = 1000
 OUT_OF_RANGE = "図の範囲外"
 REVERSED = "大小が逆"
 
@@ -52,6 +53,17 @@ class Frame:
     def canvas_rect(self) -> tuple[int, int, int, int]:
         """キャンバスの枠（土台のピクセル）。［全面］と同じ `W//2` を使う。"""
         return self.ox - self.w // 2, self.oy - self.h // 2, self.ox + self.w // 2, self.oy + self.h // 2
+
+
+def tolerance(f: Frame) -> int:
+    """部品が返す座標のずれの許容幅（px）。この範囲の差は「触っていない」とみなす。
+
+    部品は土台を画面に合わせて縮小して持ち、座標を返すときに `round(座標 / 縮小率)` で割り戻す。縮小率が s なら、
+    読み込んだだけでも最大 0.5/s px ずれる（土台 3072px を 752px で表示すると s≈0.245 で、最大 2px）。
+    画面での 1px の操作は 1/s px の変化なので、0.5/s は意図した操作の半分。縮小率は Python からは分からないので、
+    画面で 500px 幅以上に表示される前提で、土台の長辺から見積もる（長辺 3072px なら 4px）。
+    """
+    return max(TOL, math.ceil(max(f.width, f.height) / TOL_DIVISOR))
 
 
 def valid_margin(margin) -> bool:
@@ -114,8 +126,8 @@ def _parse(box) -> tuple[str, float, float, float, float] | None:
         return None
 
 
-def _near(a, b) -> bool:
-    return all(abs(p - q) <= TOL for p, q in zip(a, b))
+def _near(a, b, tol: int) -> bool:
+    return all(abs(p - q) <= tol for p, q in zip(a, b))
 
 
 def _empty(p) -> bool:
@@ -126,11 +138,13 @@ def _empty(p) -> bool:
 def apply_figure(items: list[dict], boxes, f: Frame) -> tuple[list[dict], bool, list[str]]:
     """図から届いた四角をカードに反映する。(新しいカード, 変わったか, 通知)。
 
-    - ラベル `#n` の四角 → n 番目のカードの bbox（±TOL 以内なら触っていない）。編集対象外のカードは変えない
+    - ラベル `#n` の四角 → n 番目のカードの bbox（`tolerance(f)` 以内なら触っていない）。編集対象外のカードは変えない
+      動かした四角でも、`tolerance(f)` 以内にしか変わっていない辺は、カードの元の値のままにする（動かしていない辺をずらさない）
     - 図から消えた四角は、削除とは扱わない（カードはそのまま）
     - ラベルが `#n` でない四角（図で描いたもの）→ 末尾に新しいカード（label=object、caption 空）。上限なら追加しない
     """
     out = [copy.deepcopy(it) for it in items]
+    tol = tolerance(f)
     notes: list[str] = []
     parsed = [p for b in (boxes or []) if (p := _parse(b))]
     claimed: set[int] = set()
@@ -144,14 +158,15 @@ def apply_figure(items: list[dict], boxes, f: Frame) -> tuple[list[dict], bool, 
         if not cands:
             continue
         cur = to_image(it["bbox"], f)
-        same = next((k for k in cands if _near(parsed[k][1:], cur)), None)
+        same = next((k for k in cands if _near(parsed[k][1:], cur, tol)), None)
         if same is not None:
             claimed.add(same)
             continue
         k = cands[0]
         claimed.add(k)
         if not _empty(parsed[k]):
-            out[i]["bbox"] = from_image(*parsed[k][1:], f)
+            moved = from_image(*parsed[k][1:], f)
+            out[i]["bbox"] = [old if abs(new - old) <= tol else new for new, old in zip(moved, it["bbox"])]
     for k, p in enumerate(parsed):
         if k in claimed or p[0] in foreign or _empty(p):
             continue
@@ -163,9 +178,10 @@ def apply_figure(items: list[dict], boxes, f: Frame) -> tuple[list[dict], bool, 
 
 
 def figure_matches(items: list[dict], boxes, f: Frame) -> bool:
-    """図の四角が、カードから作った四角と（±TOL で）一致しているか。一致なら描き直さなくてよい。"""
+    """図の四角が、カードから作った四角と（`tolerance(f)` 以内で）一致しているか。一致なら描き直さなくてよい。"""
     expected = {b["label"]: (b["xmin"], b["ymin"], b["xmax"], b["ymax"]) for b in figure_boxes(items, f)[0]}
     parsed = [p for b in (boxes or []) if (p := _parse(b))]
     if len(parsed) != len(expected) or len({p[0] for p in parsed}) != len(parsed):
         return False
-    return all(p[0] in expected and _near(p[1:], expected[p[0]]) for p in parsed)
+    tol = tolerance(f)
+    return all(p[0] in expected and _near(p[1:], expected[p[0]], tol) for p in parsed)
