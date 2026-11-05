@@ -14,6 +14,7 @@ from moa.comfy import (ComfyConfig, ComfyError, Generation, differences, effecti
                        iter_run, supports_anima_scale)
 from moa.comfy.config import STAGE_LABEL
 from moa.core import Repository
+from moa.core.constants import SEED_MAX
 from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue
 from moa.ui import logic as L
@@ -55,6 +56,7 @@ def build_ui(repo: Repository,
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
         sv = gr.State(SB.new_sv())  # 保存ブロックの状態（保存先フォルダ・一覧で選んだ Scene・確認待ち）。共通ピッカーの nav とは別
         qe = gr.State(Q.new_qe())  # クイック編集（10.1章）：編集した欄・差分。保存はしない
+        sd = gr.State(L.new_sd())  # シードの固定状態（13.2章）。固定中だけ、欄の値で生成する
 
         with gr.Row():
             # ---- 左：共有ブラウザ（常時表示。ボタンで選択先を切り替える）----
@@ -169,6 +171,13 @@ def build_ui(repo: Repository,
                                     scale_md = gr.Markdown("")
                                     scale_rb = gr.Button("↩ 1.0に戻す", size="sm", interactive=False,
                                                          scale=0, min_width=120)
+                gr.Markdown("#### シード\n既定はランダム。生成すると、使ったシードが欄に出ます。"
+                            "［固定］を押すと、欄の値で生成し続けます（もう一度押すとランダムに戻ります）。"
+                            "保存済みのシードがある Scene を開くと、そのシードで固定されます。")
+                with gr.Row():
+                    seed_nb = gr.Number(label="シード", precision=0, minimum=0, maximum=SEED_MAX, scale=3)
+                    seed_btn = gr.Button(L.seed_labels(L.new_sd())[0], scale=2)
+                seed_md = gr.Markdown(L.seed_labels(L.new_sd())[1])
                 gen_btn = gr.Button("🎨 生成", variant="primary")
                 retry_btn = gr.Button("🔁 Anima段だけ再試行", visible=False)
                 gen_status = gr.Markdown()
@@ -218,6 +227,8 @@ def build_ui(repo: Repository,
         GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]] + [scale_sl, scale_md, scale_rb]
         GP_IN = [sc, gp, scale_sl]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
+        SD_OUT = [sd, seed_nb, seed_btn, seed_md]
+        SD_IN = [sc, sd]
 
         # ---- 出力の組み立て ----
         def data_issues_text() -> str:
@@ -423,6 +434,27 @@ def build_ui(repo: Repository,
             gp2 = L.sync_gp(sc_v, gp_v)
             return [gp2] + gp_view(gp2) + scale_view(sc_v, scale)
 
+        # ---- シード固定（13.2章）----
+        def sd_view(sd_v, keep_value=False):
+            label, text = L.seed_labels(sd_v)
+            return [sd_v, gr.skip() if keep_value else sd_v["value"], label, text]
+
+        def refresh_sd(sc_v, sd_v):
+            """Scene を開いたら、保存されていたシードがあれば固定ON、なければランダムに戻す。"""
+            sd2 = L.sync_sd(sc_v, sd_v)
+            return sd_view(sd2, keep_value=(sd2 is sd_v))
+
+        def on_seed_toggle(typed, sd_v):
+            sd2, warn = L.toggle_sd(sd_v, typed)
+            out = sd_view(sd2, keep_value=True)
+            if warn:
+                out[3] = warn
+            return out
+
+        def on_seed_after_generate(sd_v, gen_v):
+            sd2 = L.after_generate(sd_v, gen_v)
+            return sd_view(sd2, keep_value=(sd2 is sd_v))
+
         def on_scale_release(sc_v, scale):
             return scale_view(sc_v, scale)[1:]
 
@@ -497,9 +529,14 @@ def build_ui(repo: Repository,
                            + "）。試し打ちなので、保存してもシードと画像は記録されません")
             yield out
 
-        def on_generate(sc_v, copy_dir, gp_v, scale, moss, anima, negm, nega):
+        def on_generate(sc_v, copy_dir, gp_v, scale, sd_v, typed_seed, moss, anima, negm, nega):
             """生成を実行し、経過を逐次表示する。YAMLへの記録は保存ボタンで行う。"""
             skip = gr.skip()
+            try:   # 固定中は欄の値、そうでなければ None（ランダム）
+                seed = L.seed_for_run(sd_v, typed_seed)
+            except ValueError as e:
+                yield [f"❌ {e}", skip, skip, skip]
+                return
             cfg = comfy["cfg"]
             if cfg is None:
                 yield ["⚠ ComfyUI連携の設定が無効です（上の設定状態を確認してください）", skip, skip, skip]
@@ -516,8 +553,8 @@ def build_ui(repo: Repository,
             except Q.QuickEditError as e:
                 yield [f"❌ {e}", skip, skip, skip]
                 return
-            yield from stream(iter_run(cfg, result_sent, Path(copy_dir) if copy_dir else None, gen=gp_v["gen"],
-                                       anima_scale=scale),
+            yield from stream(iter_run(cfg, result_sent, Path(copy_dir) if copy_dir else None, seed=seed,
+                                       gen=gp_v["gen"], anima_scale=scale),
                               quick=Q.quick_info(result, sent))
 
         def on_retry(sc_v, copy_dir, gp_v, scale, gen_v):
@@ -550,14 +587,17 @@ def build_ui(repo: Repository,
         clear_q_btn.click(on_clear_query, [nav], NAV_OUT, api_name="clear_query")
         lst.input(on_browse, [lst, sc, nav, qe], FULL, api_name="browse").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_browse").then(
+            refresh_sd, SD_IN, SD_OUT, api_name="sd_after_browse").then(
             refresh_save, SV_IN, SV_OUT, api_name="sv_after_browse")
         upload.upload(on_upload, [upload, sc, nav, qe], FULL, api_name="upload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_upload").then(
+            refresh_sd, SD_IN, SD_OUT, api_name="sd_after_upload").then(
             refresh_save, SV_IN, SV_OUT, api_name="sv_after_upload")
         neg_cb.input(on_negative, [neg_cb, sc, nav, qe], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav, qe], FULL + COMFY_OUT, api_name="reload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_reload").then(
+            refresh_sd, SD_IN, SD_OUT, api_name="sd_after_reload").then(
             refresh_save, SV_IN, SV_OUT, api_name="sv_after_reload")
         SAVE_IN = [sc, nav, sv, slug_tb, name_tb, gen, gp, qe]
         SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row, sv]
@@ -574,12 +614,14 @@ def build_ui(repo: Repository,
         ext_reload_btn.click(on_ext_reload, [sc, nav, sv, qe], FULL + [save_msg, ext_row, sv],
                              api_name="ext_reload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_ext_reload").then(
+            refresh_sd, SD_IN, SD_OUT, api_name="sd_after_ext_reload").then(
             refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_reload")
         folder_rd.input(on_sv_move, [folder_rd, sc, sv], [sv] + SV_VIEW, api_name="sv_move")
         scene_rd.input(on_sv_select, [scene_rd, sc, sv], SV_OUT, api_name="sv_select")
         mkdir_btn.click(on_mkdir, [newdir_tb, sc, sv], SV_VIEW + [save_msg, newdir_tb], api_name="mkdir")
         demo.load(on_load, [sc, nav, qe], FULL + COMFY_OUT, api_name="init").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_init").then(
+            refresh_sd, SD_IN, SD_OUT, api_name="sd_after_init").then(
             refresh_save, SV_IN, SV_OUT, api_name="sv_after_init")
         for (stage, param), (sl, src, rb) in items.items():
             sl.release(partial(on_release, stage, param), [sl, gp], [gp, src, rb],
@@ -590,7 +632,10 @@ def build_ui(repo: Repository,
         scale_rb.click(on_scale_reset, [sc], [scale_sl, scale_md, scale_rb], api_name="scale_reset")
         pick_dir_btn.click(on_pick_dir, [copy_dir_tb], [copy_dir_tb, gen_status], api_name="pick_dir")
         clear_dir_btn.click(lambda: "", None, [copy_dir_tb], api_name="clear_dir")
-        gen_btn.click(on_generate, [sc, copy_dir_tb, gp, scale_sl, moss_tb, anima_tb, negm_tb, nega_tb], GEN_OUT, api_name="generate")
+        gen_btn.click(on_generate, [sc, copy_dir_tb, gp, scale_sl, sd, seed_nb, moss_tb, anima_tb, negm_tb, nega_tb],
+                      GEN_OUT, api_name="generate").then(
+            on_seed_after_generate, [sd, gen], SD_OUT, api_name="sd_after_generate")
+        seed_btn.click(on_seed_toggle, [seed_nb, sd], SD_OUT, api_name="seed_toggle")
         QE_IN = [qe, sc, moss_tb, anima_tb, negm_tb, nega_tb]
         for f, tb in QE_TB.items():
             tb.blur(on_qe_commit, QE_IN, QE_OUT, api_name=f"qe_blur_{f}")

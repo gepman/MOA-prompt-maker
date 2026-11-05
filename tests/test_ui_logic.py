@@ -482,3 +482,69 @@ def test_scene_save_detects_external_change_and_offers_two_choices(repo, data_di
     assert L.save(repo, sc3, over_target(repo), "", None)[1].startswith(L.EXTERNAL_PREFIX)
     sc4, nav4, msg = L.reopen_scene(repo, sc3, nav)                                       # [再読み込み（編集を破棄）]
     assert "開きました" in msg and "保存しました" in L.save(repo, sc4, over_target(repo), "", None)[1]
+
+
+# ---- シード固定（13.2章）----
+def test_opening_a_scene_with_a_saved_seed_fixes_it_and_one_without_returns_to_random(repo, data_dir):
+    sc, nav, _ = open_scene(repo)
+    assert sc["seed"] is None
+    sd = L.sync_sd(sc, L.new_sd())
+    assert (sd["fixed"], sd["value"]) == (False, None)                         # シードの無い Scene：ランダム・欄は空
+
+    gp = L.sync_gp(sc, L.new_gp())
+    save_new(repo, sc, "with_seed", "", snapshot_for(repo, sc, gp), gen_params=gp["gen"],
+             effective=effective_gen(_cfg(), gp["gen"]))                       # seed: 4242 を記録した Scene
+    sc2, nav2, _ = pick(repo, sc, nav, "scene", "file:scenes/with_seed.yaml")
+    assert sc2["seed"] == 4242
+    sd2 = L.sync_sd(sc2, sd)
+    assert (sd2["fixed"], sd2["value"]) == (True, 4242)                        # 保存されていたシードで固定ON
+
+    sd3 = L.sync_sd(sc2, {**sd2, "fixed": False})                              # 同じ Scene のまま（Action 選び直しなど）：状態を保つ
+    assert sd3["fixed"] is False
+    sc3, _, _ = pick(repo, sc2, nav, "scene", "file:scenes/beach_chat__trio.yaml")
+    sd4 = L.sync_sd(sc3, sd2)                                                  # 別の Scene（シードなし）：固定を解除して欄を空にする
+    assert (sd4["fixed"], sd4["value"]) == (False, None)
+
+
+@pytest.mark.parametrize("bad", [-1, 4294967296, True, "12", 1.5, None])
+def test_an_invalid_saved_seed_is_treated_as_none(bad):
+    assert L.valid_seed(bad) is None
+    sd = L.sync_sd({**L.new_sc(), "open_seq": 1, "seed": bad}, L.new_sd())
+    assert (sd["fixed"], sd["value"]) == (False, None)
+
+
+@pytest.mark.parametrize("ok", [0, 4242, 4294967295, 7.0])
+def test_valid_seed_accepts_the_range(ok):
+    assert L.valid_seed(ok) == int(ok)
+
+
+def test_toggle_fixes_with_the_typed_value_and_releases_back_to_random():
+    sd = L.new_sd()
+    sd1, warn = L.toggle_sd(sd, None)
+    assert sd1 == sd and "空" in warn                                         # 空の欄では固定しない
+    sd2, warn = L.toggle_sd(sd, 4294967296)
+    assert sd2 == sd and "整数" in warn                                       # 範囲外では固定しない
+    sd3, warn = L.toggle_sd(sd, 99)
+    assert (sd3["fixed"], sd3["value"], warn) == (True, 99, "")
+    sd4, warn = L.toggle_sd(sd3, 99)                                          # もう一度押すと解除
+    assert (sd4["fixed"], sd4["value"], warn) == (False, 99, "")              # 欄の値は表示用に残る
+    assert L.seed_labels(sd3)[0] != L.seed_labels(sd4)[0]
+
+
+def test_seed_for_run_uses_the_typed_value_only_while_fixed():
+    assert L.seed_for_run(L.new_sd(), 5) is None                               # ランダム
+    assert L.seed_for_run({**L.new_sd(), "fixed": True, "value": 5}, 77) == 77  # 固定中は欄の値（手入力も効く）
+    with pytest.raises(ValueError):
+        L.seed_for_run({**L.new_sd(), "fixed": True}, None)
+    with pytest.raises(ValueError):
+        L.seed_for_run({**L.new_sd(), "fixed": True}, 4294967296)
+
+
+def test_after_generate_shows_the_used_seed_only_when_not_fixed_and_moss_succeeded():
+    snap = {"seed": 123, "images": ["output/m.png"]}
+    assert L.after_generate(L.new_sd(), snap)["value"] == 123                  # ランダム：直前のシードを表示
+    fixed = {**L.new_sd(), "fixed": True, "value": 5}
+    assert L.after_generate(fixed, snap) == fixed                              # 固定中：欄はそのまま
+    sd = {**L.new_sd(), "value": 9}
+    assert L.after_generate(sd, {"seed": 123, "images": []}) == sd             # MOSS段の失敗：更新しない
+    assert L.after_generate(sd, None) == sd

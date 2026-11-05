@@ -4,6 +4,7 @@
   sc … 組み立て中のSceneの内容。変わるとキャスト枠を描き直す
   nav … 共有ブラウザの選択先と表示フォルダ、保存先フォルダ。フォルダ移動だけでは枠を描き直さない
   gp … 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
+  sd … シードの欄と固定の状態（固定中だけ、欄の値で生成する）
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from ruamel.yaml import YAML
 from moa.comfy.generate import differences
 from moa.comfy.workflow import SMALL_SIDE, anima_size
 from moa.core import CastEntry, Repository, Scene, compile_scene, resolve_outfit, save_scene, validate_scene_id
-from moa.core.constants import ROOTS
+from moa.core.constants import ROOTS, SEED_MAX
 from moa.core.filestamp import ExternalChangeError
 from moa.core.gen import GEN_PARAMS, clean_gen, normalize_value
 from moa.core.models import CompileResult, Issue, has_error
@@ -38,6 +39,7 @@ def new_sc() -> dict:
             "cast": {}, "apply_negative": False,
             "stamp": None,    # 開いたSceneのファイルの更新情報（外部変更の検知用。EDITOR_SPEC 12章-4）
             "gen": {},        # 開いたSceneに保存されていた Scene.gen（操作中の値は gp 側）
+            "seed": None,     # 開いたSceneに compiled.seed として保存されていたシード（範囲外は None。操作中の値は sd 側）
             "open_seq": 0}    # Scene を開くたびに増える。gp が「開き直し」を検知するための番号
 
 
@@ -174,6 +176,7 @@ def apply_entry(repo: Repository, sc: dict, nav: dict, entry) -> tuple[dict, dic
               "action_id": s.action,
               "cast": {slot: {"character": e.character, "outfit": e.outfit} for slot, e in s.cast.items()},
               "apply_negative": s.apply_negative, "gen": copy.deepcopy(s.gen), "open_seq": sc["open_seq"] + 1,
+              "seed": valid_seed((entry.raw.get("compiled") or {}).get("seed")),
               "stamp": list(entry.stamp) if entry.stamp else None}
         return sc, _next_target(repo, sc, nav), f"✅ Scene を開きました：{s.name or s.id}" + stale_note(repo, entry)
 
@@ -436,6 +439,73 @@ def sync_gp(sc: dict, gp: dict) -> dict:
     if sc["open_seq"] != gp["seq"]:
         return {"seq": sc["open_seq"], "gen": clean_gen(sc["gen"])}
     return gp
+
+
+# ---- シード固定（SPEC 13.2）----
+# sd = {"seq": open_seq, "fixed": bool, "value": int | None}
+#   fixed … True の間は、欄の値で生成する。False のときの value は表示用（直前に使ったシード）で、生成にはランダムな値を使う
+def valid_seed(value) -> int | None:
+    """整数で 0〜SEED_MAX のときだけその値。それ以外（None・bool・小数・範囲外）は None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, int) and 0 <= value <= SEED_MAX:
+        return value
+    return None
+
+
+def new_sd() -> dict:
+    return {"seq": 0, "fixed": False, "value": None}
+
+
+def sync_sd(sc: dict, sd: dict) -> dict:
+    """Scene を（開き直しも含めて）開いたら、保存されていたシードがあればそれで固定ON、なければランダムに戻す。
+
+    Action / Background を選び直しただけのときは番号が変わらないので、今の状態を保つ。
+    """
+    if sc["open_seq"] != sd["seq"]:
+        seed = valid_seed(sc.get("seed"))
+        return {"seq": sc["open_seq"], "fixed": seed is not None, "value": seed}
+    return sd
+
+
+def toggle_sd(sd: dict, typed) -> tuple[dict, str]:
+    """［シード固定］ボタン。固定中なら解除（ランダムに戻る）。解除中なら欄の値で固定する。(sd, 警告。なければ空)"""
+    if sd["fixed"]:
+        return {**sd, "fixed": False}, ""
+    seed = valid_seed(typed)
+    if seed is None:
+        return sd, (f"⚠ 固定するシードを 0〜{SEED_MAX} の整数で入力してください" if typed is not None
+                    else "⚠ 固定するシードが空です。先に一度生成するか、数値を入力してください")
+    return {**sd, "fixed": True, "value": seed}, ""
+
+
+def seed_for_run(sd: dict, typed) -> int | None:
+    """生成に渡すシード。固定ON なら欄の値、OFF なら None（ランダム）。固定ON で欄が不正なら ValueError。"""
+    if not sd["fixed"]:
+        return None
+    seed = valid_seed(typed)
+    if seed is None:
+        raise ValueError(f"固定するシードが範囲外か空です（0〜{SEED_MAX} の整数を入れてください）")
+    return seed
+
+
+def after_generate(sd: dict, snapshot: dict | None) -> dict:
+    """生成が終わったら、固定OFF のときだけ、直前に使ったシードを欄に出す。
+
+    snapshot は Generation.snapshot()（gen 状態）。MOSS段が失敗したとき（画像なし・None）は更新しない。
+    """
+    if sd["fixed"] or not snapshot or not snapshot.get("images"):
+        return sd
+    return {**sd, "value": snapshot["seed"]}
+
+
+def seed_labels(sd: dict) -> tuple[str, str]:
+    """(ボタンの文言, 状態の表示)。"""
+    if sd["fixed"]:
+        return "🔓 シード固定を解除", "🔒 **シード固定中**：欄の値で生成します"
+    return "🔒 シードを固定", "🎲 **ランダム**：生成ごとに新しいシードを使います（欄は直前のシード）"
 
 
 def set_override(gp: dict, stage: str, param: str, value) -> dict:
