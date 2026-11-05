@@ -1,4 +1,4 @@
-"""mossItems のカード式編集（EDITOR_SPEC 8章）。カードは最大 MAX_ITEMS（64）枚。おすすめは 8 件まで（文言だけ）。純粋関数で、新しいリストを返す。"""
+"""mossItems のカード式編集（EDITOR_SPEC 8章）。カードは最大 MAX_ITEMS（32）枚。おすすめは 8 件まで（文言だけ）。純粋関数で、新しいリストを返す。"""
 from __future__ import annotations
 
 import copy

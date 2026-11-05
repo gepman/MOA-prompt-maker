@@ -16,7 +16,7 @@ LIST_KEYS = ("tags", "metaTags", "slots")
 TEXT_KEYS = ("name", "group", "moss", "anima", "bodyHairMoss", "bodyHairAnima", "negativeMoss", "negativeAnima",
              "mossCaption")
 DEFAULT_CANVAS = {"w": 1536, "h": 1024}
-MAX_ITEMS = 64          # mossItems の実際の上限（カードも図もここまで追加できる。カードは最初にこの数だけ用意する）
+MAX_ITEMS = 32          # mossItems の実際の上限（カードも図もここまで追加できる。カードは最初にこの数だけ用意する）
 RECOMMENDED_ITEMS = 8   # 画面の文言でおすすめする件数。超えても、警告やエラーにはしない
 
 

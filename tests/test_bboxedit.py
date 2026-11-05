@@ -149,8 +149,8 @@ def test_drawn_box_with_a_clashing_label_is_still_new():
 def test_drawing_beyond_the_recommended_8_adds_up_to_the_max():
     items = [item([i, i, i + 5, i + 5]) for i in range(RECOMMENDED_ITEMS)]
     new, changed, notes = BE.apply_figure(items, fig_of(items) + [box("", 1000, 600, 1400, 900)], F)
-    assert changed and len(new) == RECOMMENDED_ITEMS + 1 and notes == []   # おすすめを超えても追加できる（実際の上限は 64）
-    assert MAX_ITEMS == 64
+    assert changed and len(new) == RECOMMENDED_ITEMS + 1 and notes == []   # おすすめを超えても追加できる（実際の上限は 32）
+    assert MAX_ITEMS == 32
 
 
 def test_drawing_is_ignored_at_max_items():

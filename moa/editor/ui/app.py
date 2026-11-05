@@ -864,7 +864,8 @@ def build_editor(repo: Repository, prompt_font_px: int | float = DEFAULT_PROMPT_
         wire_import(demo, repo, imp, c, OUT, pk_part, tree_part)   # インポート（15章）
 
         # 画面専用のイベントは、Gradio の「API 情報」から外す。api_name は残る（テストが使う）。
-        # API 情報はイベントごとに全入力の一覧を持ち、ページに丸ごと埋め込まれる。カード 64 枚だと約 170MB・初回表示 30 秒になる
+        # API 情報はイベントごとに全入力の一覧を持ち、ページに丸ごと埋め込まれる。カード 64 枚だと約 170MB・初回表示 30 秒になった。これを外した今は、32 枚で約 2.3MB（64 枚は約 6.9MB）。
+        # 上限を 32 枚にしたのは、64 枚だと設定情報や 1 操作の送受信が重く、操作が重かったため
         for fn in demo.fns.values():
             fn.show_api = False
 

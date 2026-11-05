@@ -12,7 +12,7 @@ def test_editor_builds(repo):
 
 
 def test_editor_events_are_hidden_from_api_info(repo):
-    """カードが 64 枚あるので、イベントを API 情報に出すと、ページに埋め込まれる量が巨大になる（約 170MB・初回表示 30 秒、
+    """カードが 32 枚あるので（64 枚のときは約 170MB・初回表示 30 秒だった）、イベントを API 情報に出すと、ページに埋め込まれる量が巨大になる（約 170MB・初回表示 30 秒、
     Gradio の起動チェックが 3 秒で打ち切られて「localhost is not accessible」で起動できなくなった）。画面専用のイベントは外す。"""
     demo = build_editor(repo)
     assert all(fn.show_api is False for fn in demo.fns.values())
@@ -104,7 +104,7 @@ def test_editor_flow_cards_and_preview(repo):
     while d["cards_n"] < RECOMMENDED_ITEMS:        # おすすめの8件までは普通に増やせる（ボタンは有効のまま）
         d.call("card_add")
     assert d.update_of("add_btn")["interactive"] is True and d["add_hint"] == ""
-    while d["cards_n"] < MAX_ITEMS:                 # 実際の上限は64件
+    while d["cards_n"] < MAX_ITEMS:                 # 実際の上限は32件
         d.call("card_add")
     assert d.update_of("add_btn")["interactive"] is False and d["add_hint"] == f"最大{MAX_ITEMS}件です"
     d.call("card_full_0")

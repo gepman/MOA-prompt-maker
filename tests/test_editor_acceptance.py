@@ -326,10 +326,10 @@ def test_13_cards(repo, data_dir):
     for _ in range(RECOMMENDED_ITEMS):             # おすすめの8件までは普通に増やせる
         assert cards.can_add(items)
         items = cards.add_item(items, canvas)
-    assert cards.can_add(items) and cards.add_hint(items) == ""      # 8件を超えても追加できる（実際の上限は64件）
+    assert cards.can_add(items) and cards.add_hint(items) == ""      # 8件を超えても追加できる（実際の上限は32件）
     while len(items) < MAX_ITEMS:
         items = cards.add_item(items, canvas)
-    assert len(items) == 64 and not cards.can_add(items) and cards.add_hint(items) == "最大64件です"
+    assert len(items) == 32 and not cards.can_add(items) and cards.add_hint(items) == "最大32件です"
     assert cards.add_item(items, canvas) == items
 
     assert cards.set_full([{"label": "object", "caption": "", "bbox": [0, 0, 1, 1]}], 0, canvas)[0]["bbox"] == [-512, -768, 512, 768]

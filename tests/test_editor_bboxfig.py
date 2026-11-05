@@ -96,7 +96,7 @@ def test_draw_in_figure_adds_a_card(repo):
 
 
 def test_draw_beyond_the_recommended_8_still_adds(repo):
-    """おすすめは8件までだが、実際の上限は64件。8件のときに図で描くと9件目が追加される（警告もエラーもない）。"""
+    """おすすめは8件までだが、実際の上限は32件。8件のときに図で描くと9件目が追加される（警告もエラーもない）。"""
     d = open_action(repo)
     while d["cards_n"] < RECOMMENDED_ITEMS:
         d.call("card_add")
@@ -109,11 +109,11 @@ def test_draw_beyond_the_recommended_8_still_adds(repo):
     assert "❌" not in d["issues"]
 
 
-def test_draw_is_ignored_at_the_max_of_64(repo):
+def test_draw_is_ignored_at_the_max_of_32(repo):
     d = open_action(repo)
     while d["cards_n"] < MAX_ITEMS:
         d.call("card_add")
-    assert d["cards_n"] == MAX_ITEMS == 64
+    assert d["cards_n"] == MAX_ITEMS == 32
     before = cards(d)
     send(d, fig(d)["boxes"] + [box("", 1000, 600, 1400, 900)])
     assert d["cards_n"] == MAX_ITEMS and cards(d) == before         # 図では追加されない
