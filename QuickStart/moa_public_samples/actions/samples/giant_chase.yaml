@@ -1,29 +1,30 @@
 id: giant_chase
 name: 夜の街の巨大化チェイス
 slots:
-- giant
-- runner
+  - giant
+  - runner
 background: city_night
 rating: safe
 metaTags:
-- sample
-- comedy
-mossCaption: 'A giant adult woman towers over a neon-lit city street at night, smashing buildings as she chases a normal-sized woman fleeing below.'
+  - sample
+  - comedy
+mossCaption: |
+  A giant {{giant}} towers over a neon-lit city street at night, smashing buildings as she chases a normal-sized woman fleeing below.
 mossItems:
-- label: object
-  caption: '{{giant}} {{giant.outfit}} She is a GIANT woman, many times taller than the buildings around her, the top of the frame cutting off above her waist, one huge foot crushing the corner of a building in a cloud of dust and rubble, leaning forward and reaching one huge hand down toward the street below, laughing with delight.'
-  bbox:
-  - -560
-  - -760
-  - 512
-  - -60
-- label: object
-  caption: '{{runner}} {{runner.outfit}} She is a normal-sized woman at the bottom right of the frame, much smaller than the giant, SPRINTING toward the RIGHT edge of the frame at full speed, AWAY from the giant behind her on the left: her body leans far forward into the sprint, her arms pumping desperately, her legs in a full sprint stride, her hair, skirt and the white cloth strips of her cape streaming behind her to the left, motion blur on her limbs. Her face is twisted in TERROR as she glances back over her shoulder at the giant: eyes wide with tiny pupils, mouth open in a scream, tears and sweat flying off her face.'
-  bbox:
-  - 120
-  - 240
-  - 500
-  - 720
+  - label: object
+    caption: '{{giant}} {{giant.outfit}} She is a GIANT woman, many times taller than the buildings around her, the top of the frame cutting off above her waist, one huge foot crushing the corner of a building in a cloud of dust and rubble, leaning forward and reaching one huge hand down toward the street below, laughing with delight.'
+    bbox:
+      - -560
+      - -760
+      - 512
+      - -60
+  - label: object
+    caption: '{{runner}} {{runner.outfit}} She is a normal-sized woman at the bottom right of the frame, much smaller than the giant, SPRINTING toward the RIGHT edge of the frame at full speed, AWAY from the giant behind her on the left: her body leans far forward into the sprint, her arms pumping desperately, her legs in a full sprint stride, her hair, skirt and the white cloth strips of her cape streaming behind her to the left, motion blur on her limbs. Her face is twisted in TERROR as she glances back over her shoulder at the giant: eyes wide with tiny pupils, mouth open in a scream, tears and sweat flying off her face.'
+    bbox:
+      - 120
+      - 240
+      - 500
+      - 720
 anima: '{{giant}}, {{giant.outfit}}, {{runner}}, {{runner.outfit}}, giantess, giant, size difference, chasing, running away, fleeing, running to the right, sprinting, leaning forward, motion blur, looking back, screaming, terror, scared, wide eyes, small pupils, tears, sweat, laughing, rubble, dust, damaged buildings, low angle, night, neon lights'
 negativeMoss: child, loli, two giants, same size, daytime, blood, gore
 negativeAnima: child, loli, teen, daytime, sunlight, blood, gore, explosion

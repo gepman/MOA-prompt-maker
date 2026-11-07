@@ -2,7 +2,9 @@ id: kuroemon
 name: クロエモン
 group: persona
 sex: female
-moss: An adult woman, about 165cm tall with fully adult proportions, very long blonde hair, and red eyes, with huge breasts.
-anima: blonde hair, long hair, red eyes, huge breasts
+moss: An adult woman, about 165cm tall with fully adult proportions, very long dark-red hair, and red eyes, with huge breasts.
+anima: dark red hair, long hair, red eyes, huge breasts
 defaultOutfit: kuroemon_dress
+bodyHairMoss: She has a sparce dark-red pubic hair.
+bodyHairAnima: sparce dark-red pubic hair
 negativeAnima: duplicate, child, loli, teen, flat chest, small breasts, censored, mosaic censoring

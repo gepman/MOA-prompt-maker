@@ -1,0 +1,16 @@
+id: stand_sample
+name: 立ち絵
+rating: explicit
+background: white_room
+slots:
+  - eromon
+mossCaption: |
+  girl is standing straight.
+mossItems:
+  - label: object
+    caption: '{{eromon}} {{eromon.outfit}} is standing with smile'
+    bbox: [-700, -320, 720, 320]
+anima: |
+  {{eromon}}, {{eromon.outfit}}, looking at viewer,
+negativeAnima: |
+  anal beads, beads, bead strand, separate balls, spheres, spray flying upward, fountain, malformed hands, extra fingers, bad hands, 2girls, multiple girls, man, boy

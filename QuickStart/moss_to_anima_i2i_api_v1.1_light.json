@@ -1,0 +1,259 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "mossImage_sft_pruned_int8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "MOSS 拡散モデル"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "mossImage_sft_txt_int4.safetensors",
+      "type": "moss_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "MOSS テキストエンコーダ"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "MOSS VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "\n  \"summary\": \n    \"meta\": [\n      \"anime illustration\",\n      \"safe\",\n      \"beach scene\"\n    ],\n    \"canvas\": \"single\",\n    \"caption\": \"Anime illustration at a sunny beach: three adult women standing on the sand by the sea, chatting and laughing together in a friendly conversation.\"\n  ,\n  \"items\": [\n    \n      \"label\": \"object\",\n      \"caption\": \"Skyla as she appears in Pokemon Black and White, an adult woman with auburn red-brown hair tied in a high top ponytail with two small propeller hair ornaments, brown eyes, lightly tanned skin and extremely huge breasts. She wears a yellow sleeveless cropped top with a black stripe, black shorts, black thigh-high stockings and yellow high heels. She laughs with her mouth open, one hand raised mid-gesture as she talks.\",\n      \"bbox\": [\n        -380,\n        -640,\n        320,\n        -260\n      ]\n    ,\n    \n      \"label\": \"object\",\n      \"caption\": \"Elesa as she appears in Pokemon Black and White, an adult woman with very long straight blonde hair and blunt bangs, blue-grey eyes, a tall model figure and extremely huge breasts. She wears huge black over-ear headphones with yellow accents and thin antenna cables. She wears a black short-sleeved cropped knitted sweater and a separate black short skirt, with bare midriff and bare thighs, and black flat shoes. She laughs with her head tilted slightly back, both hands clasped in front of her chest.\",\n      \"bbox\": [\n        -380,\n        -190,\n        320,\n        190\n      ]\n    ,\n    \n      \"label\": \"object\",\n      \"caption\": \"Hex Maniac as she appears in Pokemon X and Y, an adult woman with extremely long messy black hair with a purple tint, swirling spiral eyes and extremely huge breasts. She wears a light-blue sleeveless pilot crop top with dark harness straps, light-blue shorts, a brown belt, blue gloves and brown boots. She giggles with one hand held near her mouth, her shoulders shaking.\",\n      \"bbox\": [\n        -380,\n        260,\n        320,\n        640\n      ]\n    \n  ],\n  \"bbox_coord_space\": \"abs_centralized\",\n  \"bbox_format\": \"yxyx\"\n",
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "① MOSSプロンプト(ポジティブ)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "text": "worst quality, bad anatomy, watermark, jpeg artifact",
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "MOSS ネガティブ"
+    }
+  },
+  "6": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "サイズ(16の倍数)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "seed": 539505033095114,
+      "steps": 50,
+      "cfg": 5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "MOSS サンプラー"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "7",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "MOSS デコード"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "moss_stage1",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存:MOSS出力"
+    }
+  },
+  "10": {
+    "inputs": {
+      "unet_name": "anima_turboV11.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Anima 拡散モデル"
+    }
+  },
+  "11": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Anima テキストエンコーダ"
+    }
+  },
+  "12": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Anima VAE"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": "masterpiece, best quality, score_7, safe, 3girls, skyla (pokemon), pokemon, red hair, ponytail, hair ornament, brown eyes, huge breasts, elesa (pokemon), pokemon, blonde hair, long hair, blunt bangs, blue eyes, headphones, huge breasts, hex maniac, pokemon, black hair, long hair, very long hair, messy hair, spiral eyes, huge breasts, yellow shirt, sleeveless shirt, crop top, black shorts, thighhighs, high heels, black sweater, cropped sweater, black skirt, flat shoes, blue gloves, crop top, shorts, belt, boots, beach, ocean, sand, blue sky, standing, talking, laughing, smile, open mouth, outdoors, daytime",
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "② Animaプロンプト(ポジティブ)"
+    }
+  },
+  "14": {
+    "inputs": {
+      "text": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia",
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Anima ネガティブ"
+    }
+  },
+  "15": {
+    "inputs": {
+      "pixels": [
+        "8",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "MOSS画像 → Animaラテント"
+    }
+  },
+  "16": {
+    "inputs": {
+      "seed": 792776031243328,
+      "steps": 15,
+      "cfg": 1.5,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 0.35,
+      "model": [
+        "10",
+        0
+      ],
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "14",
+        0
+      ],
+      "latent_image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Anima i2i サンプラー(denoiseで変化量調整)"
+    }
+  },
+  "17": {
+    "inputs": {
+      "samples": [
+        "16",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Anima デコード"
+    }
+  },
+  "18": {
+    "inputs": {
+      "filename_prefix": "anima_i2i",
+      "images": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存:Anima i2i 結果"
+    }
+  }
+}

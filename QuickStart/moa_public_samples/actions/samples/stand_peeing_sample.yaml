@@ -1,0 +1,16 @@
+id: stand_peeing_sample
+name: 立ち絵（おもらし）
+rating: explicit
+background: white_room
+slots:
+  - eromon
+mossCaption: |
+  girl is standing straight, and peeing.
+mossItems:
+  - label: object
+    caption: '{{eromon}} {{eromon.outfit}} is standing with brush face. {{eromon.bodyHair}} she pulls up her skirt so the viewer can see her genetical.'
+    bbox: [-700, -320, 720, 320]
+anima: |
+  {{eromon}}, {{eromon.outfit}}, {{eromon.bodyHair}}, looking at viewer, embarrassed, orgasm face, open mouth, moaning, blush, drooling, trembling, squirting, female ejaculation, peeing herself, urine stream, urine puddle
+negativeAnima: |
+  anal beads, beads, bead strand, separate balls, spheres, spray flying upward, fountain, malformed hands, extra fingers, bad hands, 2girls, multiple girls, man, boy

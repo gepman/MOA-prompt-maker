@@ -1,0 +1,9 @@
+id: white_room
+name: 白い部屋
+canvas:
+  w: 1024
+  h: 1536
+mossCaption: A plain bright indoor room with white walls and a pale floor.
+mossItems: []
+anima: indoors, white room, simple background
+rating: safe

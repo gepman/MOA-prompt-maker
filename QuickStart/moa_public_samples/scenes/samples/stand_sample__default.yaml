@@ -1,0 +1,48 @@
+id: stand_sample__default
+name: 普通の立ち絵
+background: white_room
+action: stand_sample
+cast:
+  eromon:
+    character: alice_girl
+    outfit: alice_blouse_suspender
+applyNegative: false
+compiled:
+  background: white_room
+  action: stand_sample
+  canvas: {w: 1024, h: 1536}
+  rating: explicit
+  mossPrompt: |-
+    {
+      "summary": {
+        "meta": [
+          "anime illustration",
+          "explicit"
+        ],
+        "canvas": "single",
+        "caption": "A plain bright indoor room with white walls and a pale floor. girl is standing straight."
+      },
+      "items": [
+        {
+          "label": "object",
+          "caption": "A young girl, short in height with compact proportions of about five heads tall, with short blonde hair with a single ahoge cowlick sticking up on top and brown eyes. She wears a white blouse with a cute rounded Peter Pan collar and a blue bow tie at her neck, a blue pleated skirt held up by blue suspenders, white socks, and brown loafers. A pochette in bold primary colours, vivid red, yellow and green panels, hangs from her shoulder at her side. is standing with smile",
+          "bbox": [
+            -700,
+            -320,
+            720,
+            320
+          ]
+        }
+      ],
+      "bbox_coord_space": "abs_centralized",
+      "bbox_format": "yxyx"
+    }
+  animaPrompt: masterpiece, best quality, score_7, explicit, 1girl, solo, blonde hair, short hair, bob cut, ahoge, brown eyes, short stature, compact proportions, white blouse, peter pan collar, round collar, blue bow tie, bowtie, suspenders, blue skirt, pleated skirt, white socks, brown loafers, loafers, pochette, shoulder bag, multicolored, red, yellow, green, vivid colors, primary colors, looking at viewer, indoors, white room, simple background
+  negativeApplied: false
+  seed: 3640680760
+  images:
+    - output/moss_stage1_00799_.png
+    - output/anima_i2i_00799_.png
+  gen:
+    moss: {steps: 50, cfg: 5}
+    anima: {steps: 15, cfg: 1.5, denoise: 0.35}
