@@ -46,7 +46,7 @@ MOA-prompt-maker を、**サンプルデータで動かして1枚生成する**�
 
 | 役割 | ファイル名 | 置き場所（ComfyUI フォルダの中） | 入手先 |
 |---|---|---|---|
-| 拡散モデル | `anima_turboV11.safetensors` | `models/diffusion_models/` | <https://civitai.com/models/2458426?modelVersionId=3263843> |
+| 拡散モデル | `anima_turboV11.safetensors` | `models/diffusion_models/` | <https://civitai.com/models/2458426/anima> |
 | テキストエンコーダ | `qwen_3_06b_base.safetensors` | `models/text_encoders/` | <https://huggingface.co/circlestone-labs/Anima/tree/main/split_files>（`text_encoders/` の中） |
 | VAE | `qwen_image_vae.safetensors` | `models/vae/` | <https://huggingface.co/circlestone-labs/Anima/tree/main/split_files>（`vae/` の中） |
 
