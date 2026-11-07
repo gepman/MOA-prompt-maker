@@ -40,8 +40,7 @@ MOA-prompt-maker を、**サンプルデータで動かして1枚生成する**�
 | テキストエンコーダ | `mossImage_sft_txt_int4.safetensors` | `models/text_encoders/` |
 | VAE | `flux2-vae.safetensors` | `models/vae/` |
 
-入手先：**<https://civitai.com/models/3005406?modelVersionId=3409867>**（MOSS Image。この段のファイルは、このページにひとまとめで配布されています）
-【要確認：ページの「Files」に、上の 3 ファイルがすべて含まれているか。含まれていないファイルの入手先】
+入手先：**<https://civitai.com/models/3005406?modelVersionId=3409867>**（MOSS Image。この段の 3 ファイルは、すべてこのページに入っています）
 
 ### Anima 段（2 段目）
 
