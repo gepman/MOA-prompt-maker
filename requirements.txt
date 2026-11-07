@@ -1,5 +1,5 @@
 gradio>=5,<6
-gradio_image_annotation==0.4.1   # bbox 編集図。0.5 以降は Gradio 6 が必須なので、0.4.1 に固定する
+gradio_image_annotation==0.4.1   # bbox editor. 0.5+ requires Gradio 6, so pin 0.4.1 (keep this file ASCII: pip reads it as cp932 on Japanese Windows)
 ruamel.yaml
 jsonschema
 httpx
