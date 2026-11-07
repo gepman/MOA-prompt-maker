@@ -1,0 +1,6 @@
+id: giant_robot
+name: 巨大ロボ
+group: monster
+moss: A gigantic rugged military robot with bulky angular olive-grey armour covered in scratches and panel lines, a broad heavy torso, thick arms, and DIGITIGRADE REVERSE-JOINTED legs that bend backwards like an animal's hind legs, ending in heavy three-toed feet, with a single glowing blue optic sensor on its head, as tall as a building.
+anima: giant robot, mecha, military robot, bulky, rugged armor, olive armor, grey armor, digitigrade legs, reverse jointed legs, broad torso, glowing eye, single eye, scratches
+negativeAnima: duplicate, human, skin, organic, cute, sleek, slim, humanoid proportions, smooth armor

@@ -1,0 +1,10 @@
+id: city_night
+name: 夜の街
+canvas:
+  w: 1536
+  h: 1024
+rating: safe
+mossCaption: 'A city street at night, neon signs and warm streetlights reflecting on wet pavement, shop windows glowing, a dark blue night sky.'
+anima: city, street, night, neon lights, streetlight, wet pavement, reflections, night sky, outdoors
+negativeMoss: daytime, sunlight, beach, countryside, crowd
+negativeAnima: daytime, sunlight, crowd, cars

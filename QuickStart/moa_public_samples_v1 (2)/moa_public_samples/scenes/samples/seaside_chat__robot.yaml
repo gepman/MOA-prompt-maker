@@ -1,0 +1,11 @@
+id: seaside_chat__robot
+name: サンプル・海辺の談笑（ロボ）
+background: seaside
+action: seaside_chat
+cast:
+  first:
+    character: muse_eromon
+    outfit: muse_eromon_dress
+  second:
+    character: giant_robot
+applyNegative: true

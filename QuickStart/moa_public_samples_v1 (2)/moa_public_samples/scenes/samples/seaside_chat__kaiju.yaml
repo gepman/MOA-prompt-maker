@@ -1,0 +1,11 @@
+id: seaside_chat__kaiju
+name: サンプル・海辺の談笑（怪獣）
+background: seaside
+action: seaside_chat
+cast:
+  first:
+    character: muse_eromon
+    outfit: muse_eromon_dress
+  second:
+    character: kaiju
+applyNegative: true

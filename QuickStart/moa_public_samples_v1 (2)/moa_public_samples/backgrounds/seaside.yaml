@@ -1,0 +1,10 @@
+id: seaside
+name: 海辺
+canvas:
+  w: 1536
+  h: 1024
+rating: safe
+mossCaption: 'A sunny seaside beach, blue sky with a few white clouds, calm turquoise sea, white sand, gentle waves at the waterline.'
+anima: beach, sea, ocean, sand, blue sky, clouds, waves, outdoors, daytime
+negativeMoss: people, crowd, buildings, city, rain, night
+negativeAnima: people, crowd, buildings, rain, night, sunset

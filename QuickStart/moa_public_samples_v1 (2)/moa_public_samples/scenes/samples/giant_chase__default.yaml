@@ -1,0 +1,12 @@
+id: giant_chase__default
+name: サンプル・giant_chase
+background: city_night
+action: giant_chase
+cast:
+  giant:
+    character: muse_eromon
+    outfit: muse_eromon_dress
+  runner:
+    character: kuroemon
+    outfit: kuroemon_dress
+applyNegative: true

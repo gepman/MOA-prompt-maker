@@ -1,0 +1,6 @@
+id: kaiju
+name: 怪獣
+group: monster
+moss: A gigantic reptilian kaiju monster with dark grey scaly skin, a row of jagged dorsal spines down its back, a long thick tail, sharp claws and glowing orange eyes.
+anima: kaiju, monster, giant monster, reptilian, scales, dorsal spines, tail, claws, glowing eyes, sharp teeth
+negativeAnima: duplicate, cute, small, human, humanoid, robot, mecha

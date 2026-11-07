@@ -1,0 +1,12 @@
+id: seaside_chat__default
+name: サンプル・seaside_chat
+background: seaside
+action: seaside_chat
+cast:
+  first:
+    character: muse_eromon
+    outfit: muse_eromon_dress
+  second:
+    character: kuroemon
+    outfit: kuroemon_dress
+applyNegative: true

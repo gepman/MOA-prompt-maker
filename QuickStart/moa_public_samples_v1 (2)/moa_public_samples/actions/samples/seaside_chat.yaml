@@ -1,0 +1,29 @@
+id: seaside_chat
+name: 海辺の談笑
+slots:
+- first
+- second
+background: seaside
+rating: safe
+metaTags:
+- sample
+- everyday
+mossCaption: 'Two adult women stand at the waterline of a sunny beach, chatting and laughing together.'
+mossItems:
+- label: object
+  caption: '{{first}} {{first.outfit}} She stands at the waterline on the left side of the frame, turned three-quarters toward the other woman, laughing with her mouth open, one hand raised mid-gesture as she talks.'
+  bbox:
+  - -450
+  - -700
+  - 450
+  - -60
+- label: object
+  caption: '{{second}} {{second.outfit}} She stands at the waterline on the right side of the frame, turned three-quarters toward the other woman, smiling and listening, one hand covering her mouth as she giggles.'
+  bbox:
+  - -450
+  - 60
+  - 450
+  - 700
+anima: '{{first}}, {{first.outfit}}, {{second}}, {{second.outfit}}, standing, talking, laughing, smile, open mouth, looking at another, conversation, waterline, barefoot in shallow water'
+negativeMoss: child, loli, swimsuit, rain, night, crowd
+negativeAnima: child, loli, teen, swimsuit, bikini, rain, night, crowd, sad, crying
