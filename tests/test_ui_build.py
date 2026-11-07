@@ -8,6 +8,12 @@ def test_ui_builds_without_comfy(repo):
     build_ui(repo)
 
 
+def test_export_block_is_wired(repo):
+    names = {fn.api_name for fn in build_ui(repo).fns.values()}
+    assert {"ex_mode", "ex_move", "export_scene", "export_folder"} <= names          # 書き出しブロック（10.3章）
+    assert {"ex_after_browse", "ex_after_upload", "ex_after_reload", "ex_after_overwrite", "ex_after_init"} <= names
+
+
 def test_ui_builds_with_comfy_config(repo, tmp_path):
     cfg_text = (ROOT / "config.yaml").read_text(encoding="utf-8").replace(
         "workflow/moss_to_anima_i2i_api_v1.1.json", str(ROOT / "tests" / "fixtures" / "workflow.json").replace("\\", "/"))

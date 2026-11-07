@@ -70,6 +70,7 @@ class Repository:
         self.entries = {k: {} for k in KINDS}
         self.by_path = {}
         self.folder_meta = {}
+        self.duplicates = {}
         self.issues = []
         for root_name, kind in ROOTS.items():
             base = self.root / root_name
@@ -113,6 +114,7 @@ class Repository:
             return
         if eid in self.entries[kind]:  # 重複は同じルートの中だけで判定する（ルートが違えば同じ id でよい）
             other = self.entries[kind][eid].path
+            self.duplicates.setdefault((kind, eid), [other]).append(path)
             self.issues.append(Issue("error", f"id '{eid}' が重複しています（{other.name}）", path))
             return
 

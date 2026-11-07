@@ -14,10 +14,12 @@ from moa.comfy import (ComfyConfig, ComfyError, Generation, differences, effecti
                        iter_run, supports_anima_scale)
 from moa.comfy.config import STAGE_LABEL
 from moa.core import Repository
+from moa.core.export import export_folder, export_scene
 from moa.core.constants import SEED_MAX
 from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue
 from moa.ui import logic as L
+from moa.ui import exportblock as EB
 from moa.ui import quickedit as Q
 from moa.ui import saveblock as SB
 from moa.ui.dialogs import pick_folder
@@ -56,6 +58,7 @@ def build_ui(repo: Repository,
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
         sv = gr.State(SB.new_sv())  # 保存ブロックの状態（保存先フォルダ・一覧で選んだ Scene・確認待ち）。共通ピッカーの nav とは別
         qe = gr.State(Q.new_qe())  # クイック編集（10.1章）：編集した欄・差分。保存はしない
+        ex = gr.State(EB.new_ex())  # 書き出しブロックの状態（モード・フォルダ一括で表示中のフォルダ）。保存ブロックの sv とは別
         sd = gr.State(L.new_sd())  # シードの固定状態（13.2章）。固定中だけ、欄の値で生成する
 
         with gr.Row():
@@ -213,6 +216,24 @@ def build_ui(repo: Repository,
                     ext_reload_btn = gr.Button("再読み込み（編集を破棄）", size="sm")
                     ext_over_btn = gr.Button("外部の変更を捨てて上書き保存", variant="stop", size="sm")
 
+                # 書き出し（zip）。保存とは別の操作で、保存済みのファイルの内容を書き出す（10.3章）
+                gr.Markdown("---\n### シーンを書き出す（zip）")
+                gr.Markdown("依存する Character / Outfit / Background / Action を集めて zip にします（MOA の YAML だけ）。"
+                            "他の人のライブラリのエディタで取り込めます。")
+                ex_mode = gr.Radio(choices=[(v, k) for k, v in EB.MODE_LABELS.items()], value="scene", label="書き出す範囲")
+                with gr.Group(visible=True) as ex_scene_grp:
+                    ex_scene_md = gr.Markdown()
+                    ex_scene_btn = gr.Button("📦 このシーンを書き出す", variant="secondary", interactive=False)
+                with gr.Group(visible=False) as ex_folder_grp:
+                    ex_crumbs = gr.Markdown()
+                    ex_folder_rd = gr.Radio(choices=[], value=None, label="書き出すフォルダ（クリックで移動。scenes/ 配下。"
+                                            "対象は、そのフォルダの _folder.yaml の order に書かれた直下の Scene だけ）")
+                    ex_preview = gr.Markdown()
+                    ex_folder_btn = gr.Button("📦 このフォルダを書き出す", variant="secondary")
+                ex_strip_cb = gr.Checkbox(label="生成の記録を含めない（seed・images・gen・partial を取り除く）", value=True)
+                ex_result = gr.Markdown()
+                ex_file = gr.File(label="ダウンロード", interactive=False)
+
         NAV_OUT = [nav, lst, crumbs_md, target_md, browse_msg, query_tb]
         QE_VIEW = [moss_st, anima_st, negm_st, nega_st, moss_rb, anima_rb, negm_rb, nega_rb, diff_tb,
                    moss_df, anima_df, negm_df, nega_df]
@@ -227,6 +248,9 @@ def build_ui(repo: Repository,
         GP_OUT = [gp] + [c for key in L.ITEMS for c in items[key]] + [scale_sl, scale_md, scale_rb]
         GP_IN = [sc, gp, scale_sl]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
+        EX_VIEW = [ex_scene_md, ex_scene_btn, ex_crumbs, ex_folder_rd, ex_preview]
+        EX_IN = [sc, ex]
+        EX_OUT = [ex] + EX_VIEW
         SD_OUT = [sd, seed_nb, seed_btn, seed_md]
         SD_IN = [sc, sd]
 
@@ -398,6 +422,36 @@ def build_ui(repo: Repository,
                 return full(sc_v, sc2, nav2, qe_v, msg) + ["", gr.update(visible=False), sv2]
             repo.reload()
             return [gr.skip()] * len(FULL) + ["🔄 読み直しました。もう一度保存してください", gr.update(visible=False), sv2]
+
+        # ---- 書き出し（10.3章）----
+        def ex_parts(ex_v, sc_v):
+            crumbs, folders, preview = EB.folder_view(repo, ex_v)
+            return [EB.scene_label(repo, sc_v), gr.update(interactive=EB.scene_entry(repo, sc_v) is not None),
+                    crumbs, gr.update(choices=folders, value=None), preview]
+
+        def refresh_export(sc_v, ex_v):
+            """Scene を開いた・保存した・読み直したあとに、押せるかどうかと対象の表示を作り直す。"""
+            ex2 = EB.sync(repo, ex_v, sc_v)
+            return [ex2] + ex_parts(ex2, sc_v)
+
+        def on_ex_mode(mode, sc_v, ex_v):
+            ex2 = EB.set_mode(ex_v, mode)
+            return [ex2, gr.update(visible=mode != "folder"), gr.update(visible=mode == "folder")] + ex_parts(ex2, sc_v)
+
+        def on_ex_move(choice, sc_v, ex_v):
+            ex2 = EB.move(repo, ex_v, choice)
+            return [ex2] + ex_parts(ex2, sc_v)
+
+        def on_export_scene(sc_v, gp_v, name, strip):
+            if EB.scene_entry(repo, sc_v) is None:
+                return ["⚠ 保存済みの Scene を開いているときだけ書き出せます（新規作成中は、先に保存してください）", None]
+            changed = EB.screen_changed(repo, sc_v, gp_v["gen"], name)
+            res = export_scene(repo.root, sc_v["scene_id"], bool(strip))
+            return [EB.result_text(res, changed), EB.write_zip(res)]
+
+        def on_export_folder(ex_v, strip):
+            res = export_folder(repo.root, SB.cwd_path(repo, ex_v), bool(strip))
+            return [EB.result_text(res), EB.write_zip(res)]
 
         # ---- クイック編集（10.1章）----
         def on_qe_commit(qe_v, sc_v, moss, anima, negm, nega):
@@ -589,41 +643,55 @@ def build_ui(repo: Repository,
         lst.input(on_browse, [lst, sc, nav, qe], FULL, api_name="browse").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_browse").then(
             refresh_sd, SD_IN, SD_OUT, api_name="sd_after_browse").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_browse")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_browse").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_browse")
         upload.upload(on_upload, [upload, sc, nav, qe], FULL, api_name="upload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_upload").then(
             refresh_sd, SD_IN, SD_OUT, api_name="sd_after_upload").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_upload")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_upload").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_upload")
         neg_cb.input(on_negative, [neg_cb, sc, nav, qe], FULL, api_name="negative")
         COMFY_OUT = [data_issues_md, comfy_md, gen_btn]
         reload_btn.click(on_reload, [sc, nav, qe], FULL + COMFY_OUT, api_name="reload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_reload").then(
             refresh_sd, SD_IN, SD_OUT, api_name="sd_after_reload").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_reload")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_reload").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_reload")
         SAVE_IN = [sc, nav, sv, slug_tb, name_tb, gen, gp, qe]
         SAVE_OUT = FULL + [save_msg, data_issues_md, ext_row, sv]
         over_btn.click(on_save_over, SAVE_IN, SAVE_OUT, api_name="save_overwrite").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_overwrite")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_overwrite").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_overwrite")
         saveas_btn.click(on_save_as, SAVE_IN, SAVE_OUT, api_name="save_as").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_save_as")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_save_as").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_save_as")
         confirm_ok_btn.click(on_confirm, SAVE_IN, SAVE_OUT, api_name="save_confirm").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_confirm")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_confirm").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_confirm")
         confirm_cancel_btn.click(on_cancel, [sv], SAVE_OUT, api_name="save_cancel").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_cancel")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_cancel").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_cancel")
         ext_over_btn.click(on_ext_over, SAVE_IN, SAVE_OUT, api_name="save_ext_overwrite").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_overwrite")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_overwrite").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_ext_overwrite")
         ext_reload_btn.click(on_ext_reload, [sc, nav, sv, qe], FULL + [save_msg, ext_row, sv],
                              api_name="ext_reload").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_ext_reload").then(
             refresh_sd, SD_IN, SD_OUT, api_name="sd_after_ext_reload").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_reload")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_ext_reload").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_ext_reload")
         folder_rd.input(on_sv_move, [folder_rd, sc, sv], [sv] + SV_VIEW, api_name="sv_move")
         scene_rd.input(on_sv_select, [scene_rd, sc, sv], SV_OUT, api_name="sv_select")
+        ex_mode.input(on_ex_mode, [ex_mode, sc, ex], [ex, ex_scene_grp, ex_folder_grp] + EX_VIEW, api_name="ex_mode")
+        ex_folder_rd.input(on_ex_move, [ex_folder_rd, sc, ex], EX_OUT, api_name="ex_move")
+        ex_scene_btn.click(on_export_scene, [sc, gp, name_tb, ex_strip_cb], [ex_result, ex_file], api_name="export_scene")
+        ex_folder_btn.click(on_export_folder, [ex, ex_strip_cb], [ex_result, ex_file], api_name="export_folder")
         mkdir_btn.click(on_mkdir, [newdir_tb, sc, sv], SV_VIEW + [save_msg, newdir_tb], api_name="mkdir")
         demo.load(on_load, [sc, nav, qe], FULL + COMFY_OUT, api_name="init").then(
             refresh_gp, GP_IN, GP_OUT, api_name="gp_after_init").then(
             refresh_sd, SD_IN, SD_OUT, api_name="sd_after_init").then(
-            refresh_save, SV_IN, SV_OUT, api_name="sv_after_init")
+            refresh_save, SV_IN, SV_OUT, api_name="sv_after_init").then(
+            refresh_export, EX_IN, EX_OUT, api_name="ex_after_init")
         for (stage, param), (sl, src, rb) in items.items():
             sl.release(partial(on_release, stage, param), [sl, gp], [gp, src, rb],
                        api_name=f"gp_set_{stage}_{param}")
