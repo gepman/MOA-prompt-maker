@@ -22,8 +22,8 @@ MOA-prompt-maker を、**サンプルデータで動かして1枚生成する**�
 |---|---|
 | OS | Windows（`.bat` で起動します） |
 | Python | **3.11 以上**。3.11 で動作確認しています。入れるときは、インストーラーの「Add python.exe to PATH」にチェックを入れてください。<https://www.python.org/downloads/> |
-| ComfyUI | 画像を作る本体。【要記入：必要な版、カスタムノードの有無】 |
-| GPU | 【要記入：VRAM の目安。軽量版（下の int4）を使う目安】 |
+| ComfyUI | 画像を作る本体。**v0.43.0 で動作確認**しています。**カスタムノードは使いません**（標準のノードだけで動きます） |
+| GPU | VRAM 16GB（RTX 5070 Ti）で動作確認しています。VRAM 12GB でも動く可能性がありますが、未確認です |
 
 ---
 
@@ -34,19 +34,26 @@ MOA-prompt-maker を、**サンプルデータで動かして1枚生成する**�
 
 ### MOSS 段（1 段目）
 
-| 役割 | ファイル名 | 置き場所（ComfyUI フォルダの中） | 入手先 |
-|---|---|---|---|
-| 拡散モデル | `mossImage_sft_pruned_int8.safetensors` | `models/diffusion_models/` | 【要記入】 |
-| テキストエンコーダ | `mossImage_sft_txt_int4.safetensors` | `models/text_encoders/` | 【要記入】 |
-| VAE | `flux2-vae.safetensors` | `models/vae/` | 【要記入】 |
+| 役割 | ファイル名 | 置き場所（ComfyUI フォルダの中） |
+|---|---|---|
+| 拡散モデル | `mossImage_sft_pruned_int8.safetensors` | `models/diffusion_models/` |
+| テキストエンコーダ | `mossImage_sft_txt_int4.safetensors` | `models/text_encoders/` |
+| VAE | `flux2-vae.safetensors` | `models/vae/` |
+
+入手先：**<https://civitai.com/models/3005406?modelVersionId=3409867>**（MOSS Image。この段のファイルは、このページにひとまとめで配布されています）
+【要確認：ページの「Files」に、上の 3 ファイルがすべて含まれているか。含まれていないファイルの入手先】
 
 ### Anima 段（2 段目）
 
 | 役割 | ファイル名 | 置き場所（ComfyUI フォルダの中） | 入手先 |
 |---|---|---|---|
-| 拡散モデル | `anima_turboV11.safetensors` | `models/diffusion_models/` | 【要記入】 |
-| テキストエンコーダ | `qwen_3_06b_base.safetensors` | `models/text_encoders/` | 【要記入】 |
-| VAE | `qwen_image_vae.safetensors` | `models/vae/` | 【要記入】 |
+| 拡散モデル | `anima_turboV11.safetensors` | `models/diffusion_models/` | <https://civitai.com/models/2458426?modelVersionId=3263843> |
+| テキストエンコーダ | `qwen_3_06b_base.safetensors` | `models/text_encoders/` | <https://huggingface.co/circlestone-labs/Anima/tree/main/split_files>（`text_encoders/` の中） |
+| VAE | `qwen_image_vae.safetensors` | `models/vae/` | <https://huggingface.co/circlestone-labs/Anima/tree/main/split_files>（`vae/` の中） |
+
+- Hugging Face の `split_files` は、`diffusion_models/`、`text_encoders/`、`vae/` に分かれていて、ComfyUI の置き場所と同じ名前です。
+- 同じ Hugging Face の `split_files/diffusion_models/` には `anima-turbo-v1.1.safetensors` もありますが、**ファイル名がワークフローの `anima_turboV11.safetensors` と違います**。
+  こちらを使う場合は、ファイル名を `anima_turboV11.safetensors` に変えるか、ワークフローの JSON の `unet_name` を書き換えてください。
 
 - **軽量版と通常版**：クイックスタートは、MOSS のテキストエンコーダに **int4**（`mossImage_sft_txt_int4`）を使う軽量版のワークフローです。
   通常版のワークフロー（`workflow/moss_to_anima_i2i_api_v1.1.json`）は同じ名前の **int8**（`mossImage_sft_txt_int8.safetensors`）を使います。ほかの 5 ファイルは共通です。
