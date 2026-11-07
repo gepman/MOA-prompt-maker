@@ -12,6 +12,7 @@ def test_export_block_is_wired(repo):
     names = {fn.api_name for fn in build_ui(repo).fns.values()}
     assert {"ex_mode", "ex_move", "export_scene", "export_folder"} <= names          # 書き出しブロック（10.3章）
     assert {"ex_after_browse", "ex_after_upload", "ex_after_reload", "ex_after_overwrite", "ex_after_init"} <= names
+    assert {"fe_select", "fe_up", "fe_down", "fe_toggle", "fe_save", "fe_save_force", "fe_ext_reload"} <= names   # フォルダ情報の編集（10.4章）
 
 
 def test_ui_builds_with_comfy_config(repo, tmp_path):

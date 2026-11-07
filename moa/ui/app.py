@@ -20,6 +20,7 @@ from moa.core.gen import GEN_PARAMS
 from moa.core.models import Issue
 from moa.ui import logic as L
 from moa.ui import exportblock as EB
+from moa.ui import folderedit as FE
 from moa.ui import quickedit as Q
 from moa.ui import saveblock as SB
 from moa.ui.dialogs import pick_folder
@@ -58,6 +59,7 @@ def build_ui(repo: Repository,
         gp = gr.State(L.new_gp())  # 画面で上書きした生成パラメータ（動かした項目だけ。保存で Scene.gen になる）
         sv = gr.State(SB.new_sv())  # 保存ブロックの状態（保存先フォルダ・一覧で選んだ Scene・確認待ち）。共通ピッカーの nav とは別
         qe = gr.State(Q.new_qe())  # クイック編集（10.1章）：編集した欄・差分。保存はしない
+        fe = gr.State(FE.new_fe())  # フォルダ情報の編集の状態（10.4章）：一覧・選択・読み込み時の更新情報
         ex = gr.State(EB.new_ex())  # 書き出しブロックの状態（モード・フォルダ一括で表示中のフォルダ）。保存ブロックの sv とは別
         sd = gr.State(L.new_sd())  # シードの固定状態（13.2章）。固定中だけ、欄の値で生成する
 
@@ -230,6 +232,24 @@ def build_ui(repo: Repository,
                                             "対象は、そのフォルダの _folder.yaml の order に書かれた直下の Scene だけ）")
                     ex_preview = gr.Markdown()
                     ex_folder_btn = gr.Button("📦 このフォルダを書き出す", variant="secondary")
+                    # フォルダ情報（_folder.yaml）の編集（10.4章）。order は並び順であり、書き出し・一括処理の対象の一覧でもある
+                    with gr.Accordion("フォルダ情報を編集（_folder.yaml）", open=False):
+                        gr.Markdown("上で選んでいるフォルダの表示名・説明・order を編集します。`_folder.yaml` が無ければ保存時に作ります。"
+                                    "**order に入るのは ☑ の項目だけ**です（☐ は入らず、書き出しの対象になりません）。")
+                        fe_name = gr.Textbox(label="表示名（name）")
+                        fe_desc = gr.Textbox(label="説明（description）", lines=2)
+                        fe_list = gr.Radio(choices=[], value=None,
+                                           label="order（項目を選んで、↑↓で並べ替え／［含める・外す］で ☑・☐ を切り替え）")
+                        with gr.Row():
+                            fe_up_btn = gr.Button("↑ 上へ", size="sm")
+                            fe_down_btn = gr.Button("↓ 下へ", size="sm")
+                            fe_toggle_btn = gr.Button("☑／☐ order に含める・外す", size="sm")
+                        fe_removed = gr.Markdown()
+                        fe_save_btn = gr.Button("💾 フォルダ情報を保存", variant="secondary")
+                        fe_msg = gr.Markdown()
+                        with gr.Row(visible=False) as fe_ext_row:   # 外部変更の検知（EDITOR_SPEC 12章-4）
+                            fe_ext_reload_btn = gr.Button("再読み込み（編集を破棄）", size="sm")
+                            fe_ext_over_btn = gr.Button("外部の変更を捨てて上書き保存", variant="stop", size="sm")
                 ex_strip_cb = gr.Checkbox(label="生成の記録を含めない（seed・images・gen・partial を取り除く）", value=True)
                 ex_result = gr.Markdown()
                 ex_file = gr.File(label="ダウンロード", interactive=False)
@@ -249,8 +269,9 @@ def build_ui(repo: Repository,
         GP_IN = [sc, gp, scale_sl]
         GEN_OUT = [gen_status, gallery, gen, retry_btn]
         EX_VIEW = [ex_scene_md, ex_scene_btn, ex_crumbs, ex_folder_rd, ex_preview]
-        EX_IN = [sc, ex]
-        EX_OUT = [ex] + EX_VIEW
+        FE_VIEW = [fe_name, fe_desc, fe_list, fe_removed]
+        EX_IN = [sc, ex, fe, fe_name, fe_desc]
+        EX_OUT = [ex] + EX_VIEW + [fe] + FE_VIEW
         SD_OUT = [sd, seed_nb, seed_btn, seed_md]
         SD_IN = [sc, sd]
 
@@ -429,18 +450,53 @@ def build_ui(repo: Repository,
             return [EB.scene_label(repo, sc_v), gr.update(interactive=EB.scene_entry(repo, sc_v) is not None),
                     crumbs, gr.update(choices=folders, value=None), preview]
 
-        def refresh_export(sc_v, ex_v):
+        def fe_view(fe_v):
+            """フォルダ情報の編集欄の表示 [fe] + FE_VIEW。"""
+            return [fe_v, fe_v["name"], fe_v["description"], gr.update(choices=FE.labels(fe_v), value=fe_v["selected"]),
+                    FE.removed_text(fe_v)]
+
+        def fe_parts(ex_v, fe_v, name, desc):
+            """対象フォルダが変わった・編集していないときは、ディスクの今の内容に読み直す。同じフォルダで編集中ならそのまま残す。"""
+            folder = SB.cwd_path(repo, ex_v)
+            same = fe_v["folder"] == repo.rel(folder)
+            if same and FE.dirty(fe_v, name, desc):
+                return [fe_v] + [gr.skip()] * len(FE_VIEW)
+            return fe_view(FE.open_folder(repo, folder, fe_v["selected"] if same else None))
+
+        def refresh_export(sc_v, ex_v, fe_v, fe_name_v, fe_desc_v):
             """Scene を開いた・保存した・読み直したあとに、押せるかどうかと対象の表示を作り直す。"""
             ex2 = EB.sync(repo, ex_v, sc_v)
-            return [ex2] + ex_parts(ex2, sc_v)
+            return [ex2] + ex_parts(ex2, sc_v) + fe_parts(ex2, fe_v, fe_name_v, fe_desc_v)
 
-        def on_ex_mode(mode, sc_v, ex_v):
+        def on_ex_mode(mode, sc_v, ex_v, fe_v, fe_name_v, fe_desc_v):
             ex2 = EB.set_mode(ex_v, mode)
-            return [ex2, gr.update(visible=mode != "folder"), gr.update(visible=mode == "folder")] + ex_parts(ex2, sc_v)
+            return ([ex2, gr.update(visible=mode != "folder"), gr.update(visible=mode == "folder")] + ex_parts(ex2, sc_v)
+                    + fe_parts(ex2, fe_v, fe_name_v, fe_desc_v))
 
-        def on_ex_move(choice, sc_v, ex_v):
+        def on_ex_move(choice, sc_v, ex_v, fe_v, fe_name_v, fe_desc_v):
             ex2 = EB.move(repo, ex_v, choice)
-            return [ex2] + ex_parts(ex2, sc_v)
+            return [ex2] + ex_parts(ex2, sc_v) + fe_parts(ex2, fe_v, fe_name_v, fe_desc_v)
+
+        # ---- フォルダ情報の編集（10.4章）----
+        def on_fe_select(fe_v, value):
+            return FE.select(fe_v, value)
+
+        def on_fe_edit(action, fe_v, value):
+            fe2 = FE.select(fe_v, value)
+            fe2, msg = FE.toggle(fe2) if action == "toggle" else FE.move(fe2, action)
+            return [fe2, gr.update(choices=FE.labels(fe2), value=fe2["selected"]), FE.removed_text(fe2), msg]
+
+        def on_fe_save(force, fe_v, name, desc, nav_v, sc_v, sv_v, ex_v):
+            fe2, msg, external = FE.save(repo, fe_v, name, desc, force=force)
+            tail = [msg, gr.update(visible=external)]
+            if not msg.startswith("💾"):   # 保存していない（エラー・外部変更）：表示はそのまま
+                return [fe_v] + [gr.skip()] * len(FE_VIEW) + tail + [gr.skip()] * (len(NAV_OUT) + len(SV_VIEW) + len(EX_VIEW))
+            # 保存したら、ピッカーの表示名・並び順、保存ブロックの一覧、書き出しの対象件数をその場で更新する
+            return fe_view(fe2) + tail + nav_part(nav_v, None) + sv_parts(sv_v, sc_v) + ex_parts(ex_v, sc_v)
+
+        def on_fe_ext_reload(ex_v):
+            repo.reload()
+            return fe_view(FE.open_folder(repo, SB.cwd_path(repo, ex_v))) + ["🔄 読み直しました（編集を破棄）", gr.update(visible=False)]
 
         def on_export_scene(sc_v, gp_v, name, strip):
             if EB.scene_entry(repo, sc_v) is None:
@@ -682,8 +738,19 @@ def build_ui(repo: Repository,
             refresh_export, EX_IN, EX_OUT, api_name="ex_after_ext_reload")
         folder_rd.input(on_sv_move, [folder_rd, sc, sv], [sv] + SV_VIEW, api_name="sv_move")
         scene_rd.input(on_sv_select, [scene_rd, sc, sv], SV_OUT, api_name="sv_select")
-        ex_mode.input(on_ex_mode, [ex_mode, sc, ex], [ex, ex_scene_grp, ex_folder_grp] + EX_VIEW, api_name="ex_mode")
-        ex_folder_rd.input(on_ex_move, [ex_folder_rd, sc, ex], EX_OUT, api_name="ex_move")
+        ex_mode.input(on_ex_mode, [ex_mode, sc, ex, fe, fe_name, fe_desc],
+                      [ex, ex_scene_grp, ex_folder_grp] + EX_VIEW + [fe] + FE_VIEW, api_name="ex_mode")
+        ex_folder_rd.input(on_ex_move, [ex_folder_rd, sc, ex, fe, fe_name, fe_desc], EX_OUT, api_name="ex_move")
+        fe_list.input(on_fe_select, [fe, fe_list], [fe], api_name="fe_select")
+        FE_EDIT_OUT = [fe, fe_list, fe_removed, fe_msg]
+        fe_up_btn.click(partial(on_fe_edit, "up"), [fe, fe_list], FE_EDIT_OUT, api_name="fe_up")
+        fe_down_btn.click(partial(on_fe_edit, "down"), [fe, fe_list], FE_EDIT_OUT, api_name="fe_down")
+        fe_toggle_btn.click(partial(on_fe_edit, "toggle"), [fe, fe_list], FE_EDIT_OUT, api_name="fe_toggle")
+        FE_SAVE_IN = [fe, fe_name, fe_desc, nav, sc, sv, ex]
+        FE_SAVE_OUT = [fe] + FE_VIEW + [fe_msg, fe_ext_row] + NAV_OUT + SV_VIEW + EX_VIEW
+        fe_save_btn.click(partial(on_fe_save, False), FE_SAVE_IN, FE_SAVE_OUT, api_name="fe_save")
+        fe_ext_over_btn.click(partial(on_fe_save, True), FE_SAVE_IN, FE_SAVE_OUT, api_name="fe_save_force")
+        fe_ext_reload_btn.click(on_fe_ext_reload, [ex], [fe] + FE_VIEW + [fe_msg, fe_ext_row], api_name="fe_ext_reload")
         ex_scene_btn.click(on_export_scene, [sc, gp, name_tb, ex_strip_cb], [ex_result, ex_file], api_name="export_scene")
         ex_folder_btn.click(on_export_folder, [ex, ex_strip_cb], [ex_result, ex_file], api_name="export_folder")
         mkdir_btn.click(on_mkdir, [newdir_tb, sc, sv], SV_VIEW + [save_msg, newdir_tb], api_name="mkdir")

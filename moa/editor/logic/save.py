@@ -5,8 +5,11 @@ import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from moa.core.entity_io import save_entity, save_folder_meta
+from moa.core.entity_io import save_entity
 from moa.core.filestamp import ExternalChangeError, stamp
+from moa.core.foldermeta import ERRORS as FOLDER_ERRORS
+from moa.core.foldermeta import EXTERNAL as FOLDER_EXTERNAL
+from moa.core.foldermeta import write_folder_meta
 from moa.core.models import Issue, has_error
 from moa.core.repository import Entry, Repository
 from moa.core.usage import scenes_using_action, scenes_using_background
@@ -107,11 +110,12 @@ def save_folder(repo: Repository, st: dict, values: dict, *, force: bool = False
     order = [o.strip() for o in values["order"].splitlines() if o.strip()]
     issues = [Issue("warning", f"order の '{o}' は、このフォルダにありません", None, "order")
               for o in order if not (folder / o).exists()]
-    expected = tuple(st["stamp"]) if st["stamp"] else None
-    if not force and stamp(folder / "_folder.yaml") != expected:
-        return SaveOutcome(EXTERNAL, "ファイルが外部で変更されています", issues)
-    written = save_folder_meta(folder, values["name"], values["description"], order)
-    repo.reload()
+    res = write_folder_meta(repo, folder, values["name"], values["description"], order,
+                            expected_stamp=st["stamp"], force=force)   # 検証・外部変更の検知・書き込みは moa.core の共通処理
+    if res.status == FOLDER_EXTERNAL:
+        return SaveOutcome(EXTERNAL, res.message, issues)
+    if res.status == FOLDER_ERRORS:
+        return SaveOutcome(ERRORS, res.message, issues + res.issues)
     st = copy.deepcopy(st)
-    st.update(stamp=list(stamp(written) or ()) or None, loaded=dict(values))
-    return SaveOutcome(SAVED, f"保存しました：{written}", issues, path=written, state=st)
+    st.update(stamp=list(stamp(res.path) or ()) or None, loaded=dict(values))
+    return SaveOutcome(SAVED, res.message, issues, path=res.path, state=st)

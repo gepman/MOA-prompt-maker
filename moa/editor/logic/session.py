@@ -19,6 +19,7 @@ import copy
 from pathlib import Path
 
 from moa.core.filestamp import stamp
+from moa.core.foldermeta import folder_dirty, folder_values   # folder モードの値と未保存の判定は moa.core の共通処理
 from moa.core.repository import Repository
 
 from . import forms
@@ -45,19 +46,6 @@ def cwd_path(repo: Repository, st: dict) -> Path:
     except ValueError:
         return root
     return cwd if cwd.is_dir() else root
-
-
-# ---- folder モードの値 ----
-def folder_values(repo: Repository, folder: Path) -> dict:
-    meta = repo.folder_meta.get(folder.resolve()) or repo.folder_meta.get(folder)
-    return {"name": (meta.name if meta else None) or "", "description": (meta.description if meta else None) or "",
-            "order": "\n".join(meta.order) if meta else ""}
-
-
-def folder_dirty(current: dict, loaded: dict) -> bool:
-    norm = lambda v: {"name": v["name"].strip(), "description": v["description"].strip(),  # noqa: E731
-                      "order": [o.strip() for o in v["order"].splitlines() if o.strip()]}
-    return norm(current) != norm(loaded)
 
 
 def is_dirty(st: dict, values: dict | None) -> bool:

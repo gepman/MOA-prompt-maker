@@ -167,17 +167,17 @@ def save_entity(repo, kind: str, values: dict, *, path: Path | None = None, fold
     return path
 
 
-def save_folder_meta(folder: Path, name: str, description: str, order: list[str],
-                     expected_stamp: tuple[int, int] | None = None) -> Path:
-    """`_folder.yaml`。無ければ作る。全部空でも削除せず、空のマップのファイルとして残す。"""
-    path = Path(folder) / "_folder.yaml"
+def load_folder_doc(path: Path) -> CommentedMap:
+    """既存の `_folder.yaml` を round-trip で読む（無い・マップでないときは空のマップ）。"""
     if path.exists():
-        ensure_unchanged(path, expected_stamp)
         doc = load_roundtrip(path)
-        if not isinstance(doc, CommentedMap):
-            doc = CommentedMap()
-    else:
-        doc = CommentedMap()
+        if isinstance(doc, CommentedMap):
+            return doc
+    return CommentedMap()
+
+
+def apply_folder_values(doc: CommentedMap, name: str, description: str, order: list[str]) -> None:
+    """name / description / order のうち、変わった項目だけを doc に書く。空ならキーを消す。コメントとほかのキーは触らない。"""
     for key, value in (("name", name.strip()), ("description", description.strip()),
                        ("order", [o.strip() for o in order if o.strip()])):
         if value:
@@ -185,6 +185,16 @@ def save_folder_meta(folder: Path, name: str, description: str, order: list[str]
                 doc[key] = value
         elif key in doc:
             del doc[key]
+
+
+def save_folder_meta(folder: Path, name: str, description: str, order: list[str],
+                     expected_stamp: tuple[int, int] | None = None) -> Path:
+    """`_folder.yaml`。無ければ作る。全部空でも削除せず、空のマップのファイルとして残す。"""
+    path = Path(folder) / "_folder.yaml"
+    if path.exists():
+        ensure_unchanged(path, expected_stamp)
+    doc = load_folder_doc(path)
+    apply_folder_values(doc, name, description, order)
     atomic_dump(doc, path)
     return path
 
