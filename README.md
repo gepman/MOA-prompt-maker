@@ -6,7 +6,9 @@ ComfyUI に送って MOSS → Anima の2段で画像まで生成できます。
 
 - データは人が読んで手で編集できる YAML ファイル群です
 - 画面は「シーン組み立て画面」1つだけ（Python + Gradio）
-- **現行の仕様は [`spec_v2/SPEC.md`](spec_v2/SPEC.md)（v2.0）** です。[`spec/`](spec/) は旧版（v1.5）で、参照用と移行テストの入力として残しています
+- **現行の仕様は [`spec_v2/SPEC.md`](spec_v2/SPEC.md)（v2 系。変更履歴は冒頭）** です。[`spec/`](spec/) は旧版（v1.5）で、参照用と移行テストの入力として残しています
+
+> **まず試すなら [`QUICKSTART.md`](QUICKSTART.md)**：必要なモデルファイルの用意から、`SETUP.bat`、`QUICKSTART.bat` での起動、サンプルでの1枚の生成までの手順です。
 
 ## v2 の考え方
 
@@ -25,12 +27,19 @@ Scene が、Background・Action・キャスト（キャラと服装）を選ん�
 
 ## セットアップ
 
-Python 3.11 で動作確認しています。
+Python 3.11 以上が必要です（3.11 で動作確認しています）。
+
+**Windows では `SETUP.bat` をダブルクリック**します。`.venv` を作って `requirements.txt` を入れます（再実行しても安全）。
+手で行う場合は、PowerShell で次を実行します（同じ内容です）。
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 ```
+
+`requirements.txt` は ASCII のままにしてください（日本語版 Windows の pip は cp932 で読むため、UTF-8 の日本語コメントがあると失敗します）。
+
+サンプル（`QuickStart/`）で試すだけなら、ここから先は [`QUICKSTART.md`](QUICKSTART.md) の手順（`QUICKSTART.bat` で、ビルダーとエディタを同時に起動）に従ってください。
 
 ## 起動
 
@@ -103,7 +112,7 @@ python -m venv .venv
 
 ### Scene の保存ルール
 
-保存は「開く」とは別の操作なので、左の共有ブラウザではなく、画面の一番下の **「シーンを保存」ブロック**で行います
+保存は「開く」とは別の操作なので、左の共有ブラウザではなく、画面の下の **「シーンを保存」ブロック**で行います
 （誤操作を避けるため）。ブロックには、パンくず付きのフォルダ一覧（`scenes/` 配下を1階層ずつ移動）、そのフォルダにある既存 Scene の一覧、
 id 欄、表示名欄、［上書き保存］［別名で保存］、［＋フォルダ作成］があります。
 
@@ -126,6 +135,45 @@ id 欄、表示名欄、［上書き保存］［別名で保存］、［＋フ�
 - 内容を変えて既存のファイルに上書きすると、そのファイルにあった古い生成の記録は消えます（今回の生成と一致していれば、新しい記録が付きます）。
 - 外部変更の検知：ファイルを VS Code などで外から変更していたら、どちらのボタンでも保存を止め、［再読み込み（編集を破棄）］か
   ［外部の変更を捨てて上書き保存］を選びます。
+
+### Scene の書き出し（zip）
+
+作った Scene を、依存するデータごと zip にまとめて、他の人のライブラリに渡せます（受け取る側は、エディタの「📥 インポート」で取り込みます）。
+画面の下の **「シーンを書き出す（zip）」ブロック**で行います。MOA の YAML データ専用で、ワークフロー JSON・`config.yaml`・生成した画像ファイルは含みません。
+仕様は [`spec_v2/SPEC.md`](spec_v2/SPEC.md) の 10.3章です。
+
+- **範囲**：「開いているシーン1つ」か「フォルダ一括」を選びます。
+  - シーン1つ：保存されているファイルの内容を書き出します。未保存（新規作成中）の Scene では押せません。
+    保存後に画面で変更しているときは「保存済みの内容を書き出します（画面の変更は含まれません）」と表示します。
+  - フォルダ一括：選んだフォルダの `_folder.yaml` の **`order` に書かれた直下の Scene だけ**が対象です（`order` に無い Scene は対象外。サブフォルダの中には入りません）。
+    対象が0件なら、zip を作らずに理由を表示します。
+- **依存の集め方**：Scene → Background・Action・キャストの Character と Outfit、Action → 服装の指定と推奨背景、Character → `defaultOutfit`。
+  `none` は除き、同じものは1回だけ入ります。
+- **中身**：zip の中は `actions/`、`scenes/`、`backgrounds/`、`characters/`、`outfits/` から直接始まり、元のフォルダ構成を保ちます。
+  ファイルは加工せずにそのままコピーします。例外は次の2つだけです。
+  - `_folder.yaml`：書き出すファイルが入っているフォルダのものが入り、`order` から zip に入れない名前だけを取り除きます（ほかの項目とコメントはそのまま）。
+  - 「生成の記録を含めない」（既定オン）：Scene の `compiled` から `seed`・`images`・`gen`・`partial` を取り除きます。オフにすると、画像のパスはこの PC の中の場所になる旨を表示します。
+- **中止**：依存先が見つからない、または同じ種類・同じ id の重複があるときは、zip を作らずに、理由（参照元と参照先、重複したファイルの場所）を表示します。
+- **ファイル名**：シーン1つなら `<scene_id>_export.zip`、フォルダ一括なら `<フォルダ名>_export.zip`。ブラウザからダウンロードします。
+
+### フォルダ情報の編集（`_folder.yaml`）
+
+`scenes/` 配下のフォルダの表示名・説明・並び順（`_folder.yaml`）を、ビルダーで編集できます（エディタのフォルダ編集は4つのルートが対象で、`scenes/` は扱いません）。
+「シーンを書き出す」ブロックの **「フォルダ一括」で選んでいるフォルダ**が対象で、`scenes/` の直下も編集できます。仕様は 10.4章です。
+
+- 項目は **表示名（`name`）・説明（`description`）・`order`** です。`_folder.yaml` が無いフォルダでは、保存時に新しく作ります（全項目を空にしても削除はしません）。
+- **`order` は「並び順」であり、フォルダ一括の書き出し（とシーン一括生成）の「対象の一覧」でもあります。** そのため、実在する項目を自動では `order` に入れません。
+  一覧には、そのフォルダ直下の Scene ファイルとサブフォルダをすべて出し、**☑ の項目だけが `order` に書かれます**（☐ は入りません）。
+  - `order` に書かれている項目は ☑ で、`order` の順に先頭から並びます。書かれていない項目は ☐ で、その後ろに並びます。
+  - 項目を選んで、［↑ 上へ］［↓ 下へ］で並べ替え、［☑／☐ order に含める・外す］で切り替えます。☑ が1つも無ければ `order` は書きません（キーを消します）。
+  - ディスク上に無い名前が `order` に残っているときは「⚠ 見つからない」と表示し、**保存で取り除きます**（取り除く名前は保存前に表示します）。
+  - ファイルやフォルダの移動・改名はしません。
+- 保存は一時ファイルに書いてから置き換えます。folder スキーマで検証し、エラーなら保存せずに理由を表示します。他の項目・コメントは残し、変更した項目だけを書き換えます
+  （`order` を変更したときは配列ごと差し替えるため、`order` の項目に付けた行コメントは消えます）。
+  ファイルを外から変更していたら保存を止め、［再読み込み（編集を破棄）］か［外部の変更を捨てて上書き保存］を選びます。
+- 保存すると、ピッカーの表示名と並び順、フォルダ一括の対象件数がその場で変わります。
+- 対象のフォルダを移動すると、編集欄はそのフォルダの内容に読み直します（未保存の編集は破棄されます）。
+- 保存・検証・書き戻しの処理は `moa/core/foldermeta.py` にあり、エディタのフォルダ編集と共通です。
 
 ## データの置き方
 
@@ -223,7 +271,10 @@ zip は展開せず、配置先の外に出るパス・`__MACOSX` などのシ�
 
 ## ComfyUI 連携
 
-`config.yaml` で設定します。
+`config.yaml` で設定します。**クイックスタート用**の設定は [`QuickStart/config_quickstart.yaml`](QuickStart/config_quickstart.yaml) で、
+軽量版のワークフロー（[`QuickStart/moss_to_anima_i2i_api_v1.1_light.json`](QuickStart/moss_to_anima_i2i_api_v1.1_light.json)。MOSS のテキストエンコーダだけが int4）を使います。
+ワークフローが読み込むモデルファイル 6 つと置き場所は、[`QUICKSTART.md`](QUICKSTART.md) の「モデルファイルを ComfyUI に置く」にあります。
+`--config QuickStart/config_quickstart.yaml` を付けて起動すると使えます（`QUICKSTART.bat` が付けています）。
 
 ```yaml
 comfyui:
@@ -317,6 +368,8 @@ v1.x（Situation 形式）のデータは、移行ツールで v2 に変換で�
 - クイック編集（SPEC 10.1 章）は `tests/test_quickedit.py`（送信・記録しないこと・差分・リセット・再試行）、`tests/test_sourcemap.py`（出どころ）、
   色付き差分と文字サイズは `tests/test_diffhtml.py`、クリックで移動は `tests/test_jump.py`。
   エディタ側（EDITOR_SPEC 14 章）は `tests/test_editor_diff.py`（基準・差分・文字サイズ）と `tests/test_editor_jump.py`（移動）です。
+- エクスポート（SPEC 10.3 章）は `tests/test_export.py`（依存の閉包・zip の中身・`_folder.yaml`・生成の記録・中止）、
+  フォルダ情報の編集（10.4 章）は `tests/test_foldermeta.py`（共通処理：保存・検証・外部変更）と `tests/test_folder_edit.py`（☑／☐ の一覧・並べ替え・保存後の更新）です。
 - ComfyUI 連携のテストは、実物ではなく、テスト内で立てる偽のサーバーとスクリプト化したイベントを相手にします。ComfyUI を起動していなくても通ります。
 
 ## 構成
@@ -324,16 +377,23 @@ v1.x（Situation 形式）のデータは、移行ツールで v2 に変換で�
 ```
 app.py              ビルダーの起動スクリプト
 editor.py           エディタの起動スクリプト
+SETUP.bat           セットアップ（.venv を作って requirements.txt を入れる。1回だけ）
+QUICKSTART.bat      サンプルデータでビルダー（7860）とエディタ（7863）を同時に起動する
+QUICKSTART.md       クイックスタートの手順書（モデルの用意 → SETUP.bat → QUICKSTART.bat → 1枚生成）
 config.yaml         ComfyUI 連携の設定
 data/               実データ（characters / outfits / backgrounds / actions / scenes）
 workflow/           ComfyUI の API 形式ワークフロー
+QuickStart/         クイックスタート用：公開用サンプルデータ（moa_public_samples/）、設定（config_quickstart.yaml）、
+                    軽量版ワークフロー、インポート確認用の import_showcase.zip
 moa/
-  core/             コンパイル処理・出どころの記録・差分の共通部品（Gradio に依存しない）
+  core/             コンパイル処理・出どころの記録・差分・エクスポート（export.py）・
+                    _folder.yaml の保存（foldermeta.py）の共通部品（Gradio に依存しない）
   comfy/            ComfyUI 連携（設定・クライアント・生成・ノード割り当ての推定）
   migrate_v2/       v1.x からの移行ツール
-  ui/               ビルダーの Gradio 画面（クイック編集、色付き差分の HTML、CSS）
+  ui/               ビルダーの Gradio 画面（クイック編集、色付き差分の HTML、CSS、
+                    書き出しブロック exportblock.py、フォルダ情報の編集 folderedit.py）
   editor/           エディタ（logic/ に処理、ui/ に画面）
-spec_v2/            現行の仕様書（v2.0）・JSON Schema・サンプル
+spec_v2/            現行の仕様書（v2 系）・JSON Schema・サンプル
 spec/               旧版（v1.5）の仕様書・サンプル（移行テストの入力として使用）
 tests/              pytest
 ```
