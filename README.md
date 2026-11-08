@@ -69,6 +69,8 @@ python -m venv .venv
 
 ## 使い方
 
+画面のボタンごとの説明は、スクリーンショット付きの [`docs/BUILDER_GUI.md`](docs/BUILDER_GUI.md) にあります。
+
 1. 左の一覧から **Scene を開く**か、**Action を選んで**新規に作ります（右の「📂 Scene を開く」「🎬 Action を選ぶ」）。
    一覧はフォルダを1階層ずつ移動できます。フォルダ名は `_folder.yaml` の表示名です。
    「YAMLファイルを指定」で、ファイルを直接選ぶこともできます（YAML の `id` から `data/` 内の元ファイルを特定します）。
