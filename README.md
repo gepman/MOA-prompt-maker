@@ -234,6 +234,8 @@ Character / Outfit / Background / Action を画面で編集するアプリです
 .\.venv\Scripts\python editor.py --data data
 ```
 
+画面のボタンごとの説明は、スクリーンショット付きの [`docs/EDITOR_GUI.md`](docs/EDITOR_GUI.md) にあります。
+
 <http://127.0.0.1:7863> を開きます。ポートは `--port`、なければ `config.yaml` の `editor.port`（ビルダーは `builder.port`）。
 ビルダーと同時に起動してよく、同じ `--data` を指してください。
 
