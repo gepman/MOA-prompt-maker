@@ -195,6 +195,13 @@ data/
 - 名前が `_` または `.` で始まる**フォルダ**は読み込みません（下書き置き場に使えます）。
 - YAML の形式は `spec_v2/schemas/*.schema.json` が正本です。サンプルは `spec_v2/samples/data/` を参照してください。
 
+### LLM にデータを書かせるとき（`SKILL_MOA_format.md`）
+
+リポジトリ直下の `SKILL_MOA_format.md` は、MOA 形式の YAML（キャラクター／服装／背景／行為／Scene）を
+LLM に作成・修正させるためのスキルファイルです。5 種類のエンティティの役割、フィールド一覧、id の規則
+（`09_01` のような数字だけの id はクォートが必要、など）、MOSS 用の文章と Anima 用のタグの書き方をまとめてあります。
+データを作らせる LLM にこのファイルを読み込ませてから依頼してください（Claude の Skill として配置するか、チャットに貼り付けます）。
+
 ### プレイスホルダー
 
 Action の `mossCaption`、`mossItems[].caption`、`anima` の中で使えます（**Background では使えません**）。
