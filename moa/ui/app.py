@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-import io
+import tempfile
 from functools import partial
 from pathlib import Path
 from typing import Callable
@@ -590,8 +590,17 @@ def build_ui(repo: Repository,
 
         # ---- 生成（13章）----
         def gallery_items(done: Generation):
-            shots = [(Image.open(io.BytesIO(i.data)), f"{STAGE_LABEL[i.stage]}：{Path(i.record_path).name}")
-                     for i in done.images]
+            # PIL 画像で渡すと Gradio が WebP に再エンコードし、名前も "image" になる。
+            # 元のバイト列を元のファイル名で一時フォルダへ書き、パスで渡す（ダウンロードが元の PNG になる）
+            tmp = Path(tempfile.mkdtemp(prefix="moa_gen_"))
+            shots = []
+            for i in done.images:
+                name = Path(i.filename).name or "image.png"
+                if (tmp / name).exists():
+                    name = f"{i.stage}_{name}"
+                path = tmp / name
+                path.write_bytes(i.data)
+                shots.append((path, f"{STAGE_LABEL[i.stage]}：{Path(i.record_path).name}"))
             if done.failed_stage == "anima":  # Anima 枠は「失敗」と表示する
                 tile = Image.new("RGB", (256, 256), "#4a1d1d")
                 ImageDraw.Draw(tile).text((88, 120), "FAILED", fill="white")
