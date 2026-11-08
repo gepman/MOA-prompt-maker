@@ -68,7 +68,7 @@ python -m venv .venv
 **保存すると YAML が書き換わる**ので、サンプルを触りたくないときはコピーしたフォルダを指定してください。
 
 ```powershell
-.\.venv\Scripts\python app.py --data spec_v2/samples/data
+.\.venv\Scripts\python app.py --data QuickStart/moa_public_samples
 ```
 
 ## 使い方
@@ -199,7 +199,7 @@ data/
 - フォルダには `_folder.yaml` を置けます（表示名 `name`、並び順 `order`）。なくても動きます。
 - 並び順は、ファイル名の自然順（数字を数として読む）です。順番を付けたいときは `01_` のような番号をファイル名に付けます。
 - 名前が `_` または `.` で始まる**フォルダ**は読み込みません（下書き置き場に使えます）。
-- YAML の形式は `spec_v2/schemas/*.schema.json` が正本です。サンプルは `spec_v2/samples/data/` を参照してください。
+- YAML の形式は `spec_v2/schemas/*.schema.json` が正本です。サンプルは `QuickStart/moa_public_samples/` を参照してください。
 
 ### LLM にデータを書かせるとき（`SKILL_MOA_format.md`）
 
@@ -412,3 +412,9 @@ spec_v2/            現行の仕様書（v2 系）・JSON Schema・サンプル
 spec/               旧版（v1.5）の仕様書・サンプル（移行テストの入力として使用）
 tests/              pytest
 ```
+
+## ライセンス
+
+- このアプリのコードは [MIT ライセンス](LICENSE) です。
+- 使うモデル（MOSS-Image、Anima など）は、それぞれのライセンスに従ってください（Anima は非商用のみ）。モデルのファイルはこのリポジトリに含まれません。
+- サンプルデータに登場するキャラクターの権利は、それぞれの権利者に帰属します。
